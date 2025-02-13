@@ -3,7 +3,7 @@
 
 *.pyc
 *.json
-config.py
+
 
 ### macOS ###
 # General
