@@ -368,4 +368,4 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
         else:
             st.write(f"{area_name}에 대한 데이터가 없습니다.")
 else:
-    st.write("지도를 클릭하여 좌표를 선택하세요")
+    st.write("지도를 클릭하여 좌표를 선택하세요.")
