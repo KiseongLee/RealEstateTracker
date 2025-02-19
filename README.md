@@ -6,3 +6,4 @@
 - pip install folium
 - pip install streamlit_folium
 - pip install streamlit-aggrid
+- pip install XlsxWriter
