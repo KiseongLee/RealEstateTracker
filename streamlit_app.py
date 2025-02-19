@@ -333,28 +333,52 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                 """,
                 unsafe_allow_html=True
             )
+            
+            # 층 정보 추출하여 새로운 컬럼 추가
+            def extract_floor(floor_info):
+                """'층수'에서 층 정보를 추출합니다."""
+                if '/' in floor_info:
+                    floor = floor_info.split('/')[0].strip()
+                    return floor
+                else:
+                    return floor_info.strip()
+            
             # 다운로드 버튼을 표의 오른쪽 상단에 배치하기 위해 컬럼 생성
-            cols = st.columns([9, 1])  # 컬럼 너비 조정
+            cols = st.columns([8,2])  # 컬럼 너비 조정
 
             # 표 제목 설정
             with cols[0]:
                 st.write(f"### {area_name}의 부동산 목록")
 
-            # 버튼들을 같은 줄에 가로로 배치하고 오른쪽 정렬
             with cols[1]:
-                # 내부에서 컬럼을 생성하여 오른쪽 정렬 구현
-                button_cols = st.columns([0.33, 0.35, 0.32])  # [빈 공간, 버튼1, 버튼2]
-                with button_cols[0]:
+                # 체크박스와 버튼들을 가로로 배치하기 위해 내부에서 컬럼 생성
+                element_cols = st.columns([0.21, 0.45, 0.18, 0.16])  # [체크박스, 버튼1, 버튼2]
+
+                # 체크박스 생성
+                with element_cols[0]:
                     st.write("")  # 빈 공간으로 사용하여 버튼들을 오른쪽으로 밀기
-                with button_cols[1]:
+                with element_cols[1]:
+                    exclude_low_floors = st.checkbox("저층 제외(1,2,3,저)", key=f'checkbox_{area_name}')
+
+                # '층' 컬럼이 없다면 생성
+                if '층' not in df_display.columns:
+                    df_display['층'] = df_display['층수'].apply(extract_floor)
+
+                # 체크박스 상태에 따라 데이터 필터링
+                if exclude_low_floors:
+                    df_display = df_display[~df_display['층'].isin(['1', '2', '3', '저'])]
+
+                # 다운로드 버튼 배치 (element_cols 내부에서)
+                with element_cols[2]:
                     st.download_button(
                         label="Excel",
                         data=excel_data,
                         file_name=f'{area_name}_data.xlsx',
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         key=f'excel_{area_name}'
                     )
-                with button_cols[2]:
+
+                with element_cols[3]:
                     st.download_button(
                         label="CSV",
                         data=csv_data,
