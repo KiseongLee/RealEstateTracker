@@ -7,7 +7,7 @@ import subprocess
 import numpy as np
 from io import BytesIO
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
-
+import re
 
 # Streamlit 페이지 설정 및 초기화
 st.set_page_config(page_title="Real Estate Listings Viewer", layout="wide")
@@ -238,6 +238,93 @@ def display_table_with_aggrid(df):
         unsafe_allow_html=True,  # HTML 렌더링 허용
     )
 
+# 층 정보 추출하여 새로운 컬럼 추가
+def extract_floor(floor_info):
+    """'층수'에서 층 정보를 추출합니다."""
+    if '/' in floor_info:
+        floor = floor_info.split('/')[0].strip()
+        return floor
+    else:
+        return floor_info.strip()
+
+# 기능 추가 : 저층 제외
+def filter_out_low_floors(df_display, exclude_low_floors):
+    # '층' 컬럼이 없다면 생성
+    if '층' not in df_display.columns:
+        df_display['층'] = df_display['층수'].apply(extract_floor)
+
+    # 체크박스 상태에 따라 데이터 필터링
+    if exclude_low_floors:
+        df_display = df_display[~df_display['층'].isin(['1', '2', '3', '저'])]
+    
+    # '층' 컬럼을 제외한 표시용 데이터프레임 생성
+    df_display_for_show = df_display.drop(columns=['층'])
+    return df_display_for_show
+
+# 기능 추가 : 가격 숫자로 변경
+def convert_price_to_number(price_str):
+    # 만약 price_str이 NaN이면 0 반환
+    if pd.isnull(price_str):
+        return 0  # NaN인 경우 0 반환
+
+    # price_str이 float나 int인 경우 문자열로 변환
+    if isinstance(price_str, (float, int)):
+        price_str = str(price_str)
+    
+    # 문자열이 'nan'인 경우 0 반환
+    if price_str.lower() == 'nan':
+        return 0
+    
+    price_str = price_str.replace(',', '').replace(' ', '').strip()
+    
+    # 정규식을 사용하여 숫자와 단위를 추출
+    match = re.match(r'(\d+)(억)?(\d+)?', price_str)
+    
+    if not match:
+        return 0  # 매칭되지 않으면 0 반환
+    
+    num1 = match.group(1)  # 억 앞의 숫자
+    unit1 = match.group(2)  # '억'
+    num2 = match.group(3)  # 억 뒤의 숫자 (만원 단위)
+    
+    total = 0
+    if unit1 == '억':
+        total += int(num1) * 100000000  # 억 단위 변환
+    else:
+        total += int(num1)  # '억' 단위가 없으면 그대로
+    
+    if num2:
+        total += int(num2) * 10000  # 만원 단위 변환
+
+    return total
+
+# 기능 추가 : 가격 정렬 기준 선택
+def sort_prices_by_criteria(selected_sort_options, selected_order_option):
+    # 정렬 기준과 순서 설정
+    sort_columns = []
+    for option in selected_sort_options:
+        if option == '가격':
+            sort_columns.append('가격_숫자')
+        else:
+            sort_columns.append(option)
+
+    ascending_order = True if selected_order_option == '오름차순' else False
+    ascending_list = [ascending_order] * len(sort_columns)
+    return sort_columns, ascending_list
+
+# 기능 추가 : 가격 정렬
+def sort_prices(df_display, sort_columns=['가격_숫자'], ascending_list=[True]):
+    # 가격_숫자 컬럼 추가
+    if '가격_숫자' not in df_display.columns:
+        df_display['가격_숫자'] = df_display['가격'].apply(convert_price_to_number)
+
+    # 가격_숫자 기준으로 정렬
+    df_display_sorted = df_display.sort_values(by=sort_columns, ascending=ascending_list)
+
+    # '가격_숫자' 컬럼을 제외한 표시용 데이터프레임 생성
+    df_display_for_show = df_display_sorted.drop(columns=['가격_숫자'])
+    return df_display_for_show
+
 # 실제 데이터를 사용하여 코드 실행
 if st.session_state.get('is_processing'):
     st.info('데이터를 불러오는 중입니다. 잠시만 기다려주세요...')
@@ -289,7 +376,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                 "dealOrWarrantPrc": "가격",
                 "tradeTypeName": "거래유형",
                 "floorInfo": "층수",
-                "areaName": "면적",
+                "areaName": "공급면적",
                 "realEstateTypeName": "부동산유형",
                 "direction": "방향",
                 "articleConfirmYmd": "확인일자",
@@ -314,10 +401,6 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
             # 확인일자 형식 변환
             df_display["확인일자"] = pd.to_datetime(df_display["확인일자"], errors='coerce').dt.strftime('%Y-%m-%d')
 
-            # 다운로드 버튼 설정
-            csv_data = to_csv_with_links(df_display).encode('utf-8-sig')
-            excel_data = to_excel(df_display)
-            
             # CSS 스타일을 정의하여 컬럼 간의 간격을 조절
             st.markdown(
                 """
@@ -334,40 +417,46 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                 unsafe_allow_html=True
             )
             
-            # 층 정보 추출하여 새로운 컬럼 추가
-            def extract_floor(floor_info):
-                """'층수'에서 층 정보를 추출합니다."""
-                if '/' in floor_info:
-                    floor = floor_info.split('/')[0].strip()
-                    return floor
-                else:
-                    return floor_info.strip()
-            
             # 다운로드 버튼을 표의 오른쪽 상단에 배치하기 위해 컬럼 생성
             cols = st.columns([8,2])  # 컬럼 너비 조정
 
             # 표 제목 설정
             with cols[0]:
-                st.write(f"### {area_name}의 부동산 목록")
+                element_cols = st.columns([3.05,2.5,2.5,1.95])
+                with element_cols[0]:
+                    st.write(f"### {area_name}의 부동산 목록")
+                with element_cols[1]:
+                    # 정렬 기준 선택 multi select box 생성(복수 선택 가능)
+                    sort_options = ['매물명', '가격']
+                    selected_sort_options = st.multiselect('정렬 기준', options=sort_options, default=['가격'], label_visibility='collapsed')
+                with element_cols[2]:
+                    # 정렬 순서 선택 select box 생성
+                    order_options = ['오름차순', '내림차순']
+                    selected_order_option = st.selectbox('정렬 순서', options=order_options, label_visibility='collapsed')
+                with element_cols[3]:
+                    st.write("")  # 빈 공간으로 사용하여 버튼들을 오른쪽으로 밀기
 
             with cols[1]:
                 # 체크박스와 버튼들을 가로로 배치하기 위해 내부에서 컬럼 생성
-                element_cols = st.columns([0.21, 0.45, 0.18, 0.16])  # [체크박스, 버튼1, 버튼2]
-
+                element_cols = st.columns([0.1, 0.45, 0.19, 0.16])  # [공백, multi select box, select box, 체크박스, 버튼1, 버튼2]
                 # 체크박스 생성
                 with element_cols[0]:
                     st.write("")  # 빈 공간으로 사용하여 버튼들을 오른쪽으로 밀기
+                
                 with element_cols[1]:
                     exclude_low_floors = st.checkbox("저층 제외(1,2,3,저)", key=f'checkbox_{area_name}')
+                    
+                # 가격 기준 설정
+                sort_columns, ascending_list = sort_prices_by_criteria(selected_sort_options, selected_order_option)
+                # 가격 정렬
+                df_display = sort_prices(df_display, sort_columns=sort_columns, ascending_list=ascending_list)
+                # 저층 제외
+                df_display_for_show = filter_out_low_floors(df_display, exclude_low_floors)
 
-                # '층' 컬럼이 없다면 생성
-                if '층' not in df_display.columns:
-                    df_display['층'] = df_display['층수'].apply(extract_floor)
-
-                # 체크박스 상태에 따라 데이터 필터링
-                if exclude_low_floors:
-                    df_display = df_display[~df_display['층'].isin(['1', '2', '3', '저'])]
-
+                # 다운로드 버튼 설정
+                csv_data = to_csv_with_links(df_display_for_show).encode('utf-8-sig')
+                excel_data = to_excel(df_display_for_show)
+            
                 # 다운로드 버튼 배치 (element_cols 내부에서)
                 with element_cols[2]:
                     st.download_button(
@@ -388,7 +477,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                     )
 
             # 데이터프레임을 표시
-            display_table_with_aggrid(df_display)
+            display_table_with_aggrid(df_display_for_show)
         else:
             st.write(f"{area_name}에 대한 데이터가 없습니다.")
 else:
