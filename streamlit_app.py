@@ -8,6 +8,10 @@ import numpy as np
 from io import BytesIO
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 import re
+#현재 날짜
+from datetime import datetime
+
+
 
 # Streamlit 페이지 설정 및 초기화
 st.set_page_config(page_title="Real Estate Listings Viewer", layout="wide")
@@ -21,7 +25,10 @@ st.markdown("이 앱은 네이버 부동산 API를 사용하여 특정 좌표에
 #     # 필요한 경우 추가적인 데이터 조회나 처리 수행
 # else:
 #     st.error("동 이름을 가져올 수 없습니다.")
-    
+
+# 현재 날짜를 원하는 형식으로 가져오기 (예: YYYYMMDD)
+current_date = datetime.now().strftime('%Y%m%d')
+
 # 세션 상태 초기화
 if 'last_coords' not in st.session_state:
     st.session_state['last_coords'] = None
@@ -48,7 +55,7 @@ left_column, center_column, right_column = st.columns([1, 2, 1])  # 비율은 �
 
 with center_column:
     m = create_folium_map()
-    map_html = st_folium(m, width=700, height=500, key='my_map',  # 고정된 키 값 설정
+    map_html = st_folium(m, width=1000, height=500, key='my_map',  # 고정된 키 값 설정
     returned_objects=['last_clicked'])
 
 # 좌표 처리 및 데이터 가져오기 함수
@@ -424,7 +431,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
             with cols[0]:
                 element_cols = st.columns([3.05,2.5,2.5,1.95])
                 with element_cols[0]:
-                    st.write(f"### {area_name}의 부동산 목록")
+                    st.write(f"### {area_name}")
                 with element_cols[1]:
                     # 정렬 기준 선택 multi select box 생성(복수 선택 가능)
                     sort_options = ['매물명', '가격']
@@ -462,7 +469,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                     st.download_button(
                         label="Excel",
                         data=excel_data,
-                        file_name=f'{area_name}_data.xlsx',
+                        file_name=f'{area_name}_{current_date}.xlsx',
                         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         key=f'excel_{area_name}'
                     )
