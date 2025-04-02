@@ -583,7 +583,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                     st.download_button(
                         label="Excel",
                         data=excel_data,
-                        file_name=f'{area_name}_{current_date}.xlsx',
+                        file_name=f"{area_name}_{current_date}" + ("_저층제외" if exclude_low_floors else "") + ".xlsx",
                         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         key=f'excel_{area_name}'
                     )
