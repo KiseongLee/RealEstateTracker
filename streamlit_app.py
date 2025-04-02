@@ -10,7 +10,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 import re
 #현재 날짜
 from datetime import datetime
-
+import pprint
 
 
 # Streamlit 페이지 설정 및 초기화
@@ -123,24 +123,136 @@ if map_html:
             st.session_state['is_processing'] = False
             
             
+# 공급면적 숫자로 저장
+def extract_numeric_area(area_str):
+    """
+    공급면적에서 숫자만 추출하여 반환합니다.
+    예: '121A' -> 121, '114B' -> 114
+    """
+    # 정규식을 사용하여 숫자만 추출
+    match = re.search(r'\d+', str(area_str))
+    if match:
+        return float(match.group())  # 숫자를 float으로 변환
+    return None  # 숫자가 없으면 None 반환
 
 # 엑셀로 저장하는 함수
 def to_excel(df):
+# 요약 데이터 생성을 위해 복사본 생성
+    df_summary = df.copy()
+    
+    # 가격을 숫자로 변환하여 집계에 사용
+    df_summary['가격_숫자'] = df_summary['가격'].apply(convert_price_to_number)
+    
+    # 공급면적에서 숫자만 추출하여 '평형' 계산 (공급면적 m² -> 평, 1평 ≈ 3.3 m²)
+    df_summary["공급면적_숫자"] = df_summary["공급면적"].apply(extract_numeric_area)
+    df_summary["평형"] = (df_summary["공급면적_숫자"] / 3.3).round(1) # 소수점 한 자리로 반올림
+    # cpName이 "한국공인중개사협회"인 행은 집계 계산에서 제외 (중복 매물이 많음)
+    if "CP사" in df_summary.columns:
+        df_filtered = df_summary[df_summary["CP사"] != "한국공인중개사협회"]
+        # pprint.pprint("cpName: "+df_summary["CP사"])
+    else:
+        df_filtered = df_summary.copy()
+    
+    # 매매 데이터 집계 (필터링된 데이터 사용)
+    sale_df = df_filtered[df_filtered["거래유형"] == "매매"].groupby(
+        ["매물명", "공급면적", "평형"],
+        as_index=False
+    ).agg(
+        매매평균=("가격_숫자", "mean"),
+        매매중간=("가격_숫자", "median"),
+        매매최대=("가격_숫자", "max"),
+        매매최소=("가격_숫자", "min")
+    )
+
+    # 전세 데이터 집계 (필터링된 데이터 사용)
+    jeonse_df = df_filtered[df_filtered["거래유형"] == "전세"].groupby(
+        ["매물명", "공급면적", "평형"],
+        as_index=False
+    ).agg(
+        전세평균=("가격_숫자", "mean"),
+        전세중간=("가격_숫자", "median"),
+        전세최대=("가격_숫자", "max"),
+        전세최소=("가격_숫자", "min")
+    )
+
+    # 매매와 전세 매물 개수 계산
+    sale_count = df_filtered[df_filtered['거래유형'] == '매매'] \
+        .groupby(["매물명", "공급면적", "평형"]).size().reset_index(name='매매개수')
+    jeonse_count = df_filtered[df_filtered['거래유형'] == '전세'] \
+        .groupby(["매물명", "공급면적", "평형"]).size().reset_index(name='전세개수')
+
+    
+    # 매매 데이터와 전세 데이터를 병합
+    summary_df = pd.merge(sale_df, jeonse_df, on=["매물명","공급면적", "평형"], how="outer")
+    # 매물 개수를 병합
+    summary_df = pd.merge(summary_df, sale_count, on=["매물명", "공급면적", "평형"], how="left")
+    summary_df = pd.merge(summary_df, jeonse_count, on=["매물명", "공급면적", "평형"], how="left")
+    
+    # 갭(매매 평균값 - 전세 평균값) 계산 (전세 데이터가 없으면 NaN 처리)
+    summary_df["갭(매매-전세)(평균)"] = summary_df["매매평균"] - summary_df["전세평균"]
+    
+    # 컬럼 이름 변경 및 순서 조정
+    summary_df = summary_df.rename(columns={"매물명": "아파트명"})
+    summary_df = summary_df[
+        [
+            "아파트명",
+            "공급면적",
+            "평형",
+            "매매개수",
+            "전세개수",
+            "매매평균",
+            "매매중간",
+            "매매최대",
+            "매매최소",
+            "전세평균",
+            "전세중간",
+            "전세최대",
+            "전세최소",
+            "갭(매매-전세)(평균)"
+        ]
+    ]
+    # 요약 데이터의 가격 값들을 억 단위로 변환하는 함수
+    def format_eok(val):
+        """
+        숫자를 억 단위와 천만 단위로 변환하여 문자열로 반환합니다.
+        예: 2,550,000,000 -> 25억 5000
+            2,505,000,000 -> 25억 500
+        """
+        if pd.isna(val):
+            return ""
+        else:
+            eok = int(val // 100000000)  # 억 단위
+            remainder = int((val % 100000000) // 10000)  # 천만 단위
+            if remainder > 0:
+                return f"{eok}억 {remainder:,}"
+            else:
+                return f"{eok}억"
+            
+    # 변환할 컬럼 목록 (매매/전세 관련 값과 갭)
+    format_cols = ['매매평균', '매매중간', '매매최대', '매매최소',
+                '전세평균', '전세중간', '전세최대', '전세최소',
+                '갭(매매-전세)(평균)']
+    
+    for col in format_cols:
+        summary_df[col] = summary_df[col].apply(format_eok)
+    # 엑셀 파일 생성 (Sheet1: 상세 데이터, Sheet2: 요약 데이터)
     output = BytesIO()
     writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    
+    # Sheet1에 상세 데이터 저장
     df.to_excel(writer, index=False, sheet_name='Sheet1')
-
-    # 워크북과 워크시트 가져오기
+    
+    # Sheet2에 요약 데이터 저장
+    summary_df.to_excel(writer, index=False, sheet_name='Sheet2')
+    
+    # Sheet1에서 매물 링크를 하이퍼링크로 설정 (있을 경우)
     workbook = writer.book
     worksheet = writer.sheets['Sheet1']
-
-    # 매물 링크 컬럼의 인덱스 찾기
-    link_col_idx = df.columns.get_loc('매물 링크')
-
-    # 매물 링크 컬럼에 하이퍼링크 추가
-    for row_num, link in enumerate(df['매물 링크'], start=1):
-        worksheet.write_url(row_num, link_col_idx, link, string='매물 링크')
-
+    if "매물 링크" in df.columns:
+        link_col_idx = df.columns.get_loc("매물 링크")  # 매물 링크 컬럼의 인덱스 찾기
+        for row_num, link in enumerate(df["매물 링크"], start=1):
+            worksheet.write_url(row_num, link_col_idx, link, string='매물 링크')
+    
     writer.close()
     processed_data = output.getvalue()
     return processed_data
@@ -340,7 +452,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
     for area_name, area_data in complex_details_by_district.items():
         if area_data:
             df = pd.DataFrame(area_data)
-
+        
             # 필요한 컬럼이 있는지 확인
             required_columns = ['markerId', 'latitude', 'longitude', 'articleNo']
             missing_columns = [col for col in required_columns if col not in df.columns]
@@ -370,6 +482,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                 "sameAddrMinPrc",
                 "realtorName",
                 "sameAddrCnt",
+                "cpName",
                 "매물 링크"
             ]
 
@@ -393,6 +506,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
                 "sameAddrMinPrc": "최저가",
                 "realtorName": "중개사",
                 "sameAddrCnt": "매물수",
+                "cpName": "CP사"
                 # "매물 링크"는 이미 한글로 되어 있으므로 변경하지 않습니다.
             })
 
