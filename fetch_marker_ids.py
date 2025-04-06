@@ -78,7 +78,9 @@ def fetch_marker_info(cortars_info):
                     marker_info = {
                         'markerId': item['markerId'],
                         'latitude': item['latitude'],
-                        'longitude': item['longitude']
+                        'longitude': item['longitude'],
+                        'completionYearMonth': item['completionYearMonth'],
+                        'totalHouseholdCount': item['totalHouseholdCount']
                     }
                     marker_info_list.append(marker_info)
 
