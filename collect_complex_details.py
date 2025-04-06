@@ -29,6 +29,8 @@ if __name__ == "__main__":
             complex_no = marker_info['markerId']  # complexNo는 markerId입니다.
             latitude = marker_info['latitude']
             longitude = marker_info['longitude']
+            completionYearMonth = marker_info['completionYearMonth'] # 연식
+            totalHouseholdCount = marker_info['totalHouseholdCount'] # 총 세대수
 
             for page in range(1, 1000):  # 필요한 경우 최대 페이지 수 조정
                 details = fetch_complex_details(complex_no, page)
@@ -38,6 +40,8 @@ if __name__ == "__main__":
                         detail['markerId'] = complex_no  # markerId 추가
                         detail['latitude'] = latitude     # latitude 추가
                         detail['longitude'] = longitude   # longitude 추가
+                        detail['completionYearMonth'] = completionYearMonth # 연식 추가
+                        detail['totalHouseholdCount'] = totalHouseholdCount # 총 세대수 추가
                     area_complex_details.extend(details)
                     print(f"Successfully retrieved data for complex {complex_no}, area {area_name}, page {page}. Number of articles: {len(details)}")
                 else:

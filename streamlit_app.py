@@ -137,7 +137,7 @@ def extract_numeric_area(area_str):
 
 # 엑셀로 저장하는 함수
 def to_excel(df):
-# 요약 데이터 생성을 위해 복사본 생성
+    # 요약 데이터 생성을 위해 복사본 생성
     df_summary = df.copy()
     
     # 가격을 숫자로 변환하여 집계에 사용
@@ -145,18 +145,20 @@ def to_excel(df):
     
     # 공급면적에서 숫자만 추출하여 '평형' 계산 (공급면적 m² -> 평, 1평 ≈ 3.3 m²)
     df_summary["공급면적_숫자"] = df_summary["공급면적"].apply(extract_numeric_area)
-    df_summary["평형"] = (df_summary["공급면적_숫자"] / 3.3).round(1) # 소수점 한 자리로 반올림
+    df_summary["평형"] = (df_summary["공급면적_숫자"] / 3.3).round(1)  # 소수점 한 자리로 반올림
+    
     # cpName이 "한국공인중개사협회"인 행은 집계 계산에서 제외 (중복 매물이 많음)
     if "CP사" in df_summary.columns:
         df_filtered = df_summary[df_summary["CP사"] != "한국공인중개사협회"]
-        # pprint.pprint("cpName: "+df_summary["CP사"])
     else:
         df_filtered = df_summary.copy()
     
+    # 원데이터 df에 "연식", "총세대수" 컬럼이 있다고 가정합니다.
+    # 따라서 이 컬럼들을 그룹바이 키에 포함하여 요약 데이터에 추가합니다.
+    
     # 매매 데이터 집계 (필터링된 데이터 사용)
     sale_df = df_filtered[df_filtered["거래유형"] == "매매"].groupby(
-        ["매물명", "공급면적", "평형"],
-        as_index=False
+        ["매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
     ).agg(
         매매평균=("가격_숫자", "mean"),
         매매중간=("가격_숫자", "median"),
@@ -166,8 +168,7 @@ def to_excel(df):
 
     # 전세 데이터 집계 (필터링된 데이터 사용)
     jeonse_df = df_filtered[df_filtered["거래유형"] == "전세"].groupby(
-        ["매물명", "공급면적", "평형"],
-        as_index=False
+        ["매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
     ).agg(
         전세평균=("가격_숫자", "mean"),
         전세중간=("가격_숫자", "median"),
@@ -177,25 +178,26 @@ def to_excel(df):
 
     # 매매와 전세 매물 개수 계산
     sale_count = df_filtered[df_filtered['거래유형'] == '매매'] \
-        .groupby(["매물명", "공급면적", "평형"]).size().reset_index(name='매매개수')
+        .groupby(["매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='매매개수')
     jeonse_count = df_filtered[df_filtered['거래유형'] == '전세'] \
-        .groupby(["매물명", "공급면적", "평형"]).size().reset_index(name='전세개수')
+        .groupby(["매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='전세개수')
 
-    
-    # 매매 데이터와 전세 데이터를 병합
-    summary_df = pd.merge(sale_df, jeonse_df, on=["매물명","공급면적", "평형"], how="outer")
+    # 매매 데이터와 전세 데이터를 병합 (병합 키에 "연식", "총세대수" 추가)
+    summary_df = pd.merge(sale_df, jeonse_df, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="outer")
     # 매물 개수를 병합
-    summary_df = pd.merge(summary_df, sale_count, on=["매물명", "공급면적", "평형"], how="left")
-    summary_df = pd.merge(summary_df, jeonse_count, on=["매물명", "공급면적", "평형"], how="left")
+    summary_df = pd.merge(summary_df, sale_count, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
+    summary_df = pd.merge(summary_df, jeonse_count, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
     
     # 갭(매매 평균값 - 전세 평균값) 계산 (전세 데이터가 없으면 NaN 처리)
     summary_df["갭(매매-전세)(평균)"] = summary_df["매매평균"] - summary_df["전세평균"]
     
-    # 컬럼 이름 변경 및 순서 조정
+    # 컬럼 이름 변경 및 순서 조정 (여기서 "연식"과 "총세대수"를 추가했습니다)
     summary_df = summary_df.rename(columns={"매물명": "아파트명"})
     summary_df = summary_df[
         [
             "아파트명",
+            "연식",       
+            "총세대수",  
             "공급면적",
             "평형",
             "매매개수",
@@ -211,6 +213,7 @@ def to_excel(df):
             "갭(매매-전세)(평균)"
         ]
     ]
+    
     # 요약 데이터의 가격 값들을 억 단위로 변환하는 함수
     def format_eok(val):
         """
@@ -220,21 +223,32 @@ def to_excel(df):
         """
         if pd.isna(val):
             return ""
-        else:
-            eok = int(val // 100000000)  # 억 단위
-            remainder = int((val % 100000000) // 10000)  # 천만 단위
-            if remainder > 0:
-                return f"{eok}억 {remainder:,}"
-            else:
-                return f"{eok}억"
+        
+        sign = "-" if val < 0 else ""
+        abs_val = abs(val)
+        
+        eok = int(abs_val // 100_000_000)
+        remainder = int((abs_val % 100_000_000) // 10_000)  
+        
+        # 1억 미만 처리
+        if eok == 0:
+            return f"{sign}{remainder:,}" if remainder != 0 else "0"
+        
+        # 1억 이상 처리
+        return (
+            f"{sign}{eok}억 {remainder:,}"
+            if remainder > 0
+            else f"{sign}{eok}억"
+        )
             
     # 변환할 컬럼 목록 (매매/전세 관련 값과 갭)
     format_cols = ['매매평균', '매매중간', '매매최대', '매매최소',
-                '전세평균', '전세중간', '전세최대', '전세최소',
-                '갭(매매-전세)(평균)']
+                    '전세평균', '전세중간', '전세최대', '전세최소',
+                    '갭(매매-전세)(평균)']
     
     for col in format_cols:
         summary_df[col] = summary_df[col].apply(format_eok)
+    
     # 엑셀 파일 생성 (Sheet1: 상세 데이터, Sheet2: 요약 데이터)
     output = BytesIO()
     writer = pd.ExcelWriter(output, engine='xlsxwriter')
@@ -468,14 +482,17 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
             # 표시할 컬럼 선택
             display_columns = [
                 "articleName",
+                # 총세대수, 연식 추가
+                "completionYearMonth",
+                "totalHouseholdCount",
                 "buildingName",
                 "dealOrWarrantPrc",
                 "tradeTypeName",
                 "floorInfo",
                 "areaName",
-                "realEstateTypeName",
+                # "realEstateTypeName",
                 "direction",
-                "articleConfirmYmd",
+                #"articleConfirmYmd",
                 "articleFeatureDesc",
                 "tagList",
                 "sameAddrMaxPrc",
@@ -488,18 +505,21 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
 
             # 선택한 컬럼들로 데이터프레임 생성
             df_display = df.loc[:, display_columns].copy()
-
+                
             # 컬럼 이름을 한글로 변경
             df_display = df_display.rename(columns={
                 "articleName": "매물명",
+                # 총세대수, 연식 추가
+                "completionYearMonth": "연식",
+                "totalHouseholdCount": "총세대수",
                 "buildingName": "건물명",
                 "dealOrWarrantPrc": "가격",
                 "tradeTypeName": "거래유형",
                 "floorInfo": "층수",
                 "areaName": "공급면적",
-                "realEstateTypeName": "부동산유형",
+                # "realEstateTypeName": "부동산유형",
                 "direction": "방향",
-                "articleConfirmYmd": "확인일자",
+                #"articleConfirmYmd": "확인일자",
                 "articleFeatureDesc": "특징",
                 "tagList": "태그",
                 "sameAddrMaxPrc": "최고가",
@@ -513,14 +533,19 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
             # 긴 텍스트 컬럼 내용 줄이기
             df_display["특징"] = df_display["특징"].apply(lambda x: shorten_text(str(x)))
             df_display["태그"] = df_display["태그"].apply(lambda x: shorten_text(str(x)))
-
+            
+            # 추가: "completionYearMonth" 컬럼의 값에서 연도(앞 4자리)만 추출하여 숫자로 변환
+            df_display["연식"] = df_display["연식"].apply(
+                    lambda x: int(str(x)[:4]) if pd.notnull(x) and len(str(x)) >= 4 and str(x)[:4].isdigit() else x
+                )
+                
             # 가격에 콤마 추가
             #df_display["가격"] = df_display["가격"].apply(lambda x: f"{int(x.replace(',', '').replace(' ', '')):,}원" if isinstance(x, str) and x.replace(',', '').replace(' ', '').isdigit() else x)
             #df_display["최고가"] = df_display["최고가"].apply(lambda x: f"{int(x):,}원" if x and str(x).isdigit() else x)
             #df_display["최저가"] = df_display["최저가"].apply(lambda x: f"{int(x):,}원" if x and str(x).isdigit() else x)
 
             # 확인일자 형식 변환
-            df_display["확인일자"] = pd.to_datetime(df_display["확인일자"], errors='coerce').dt.strftime('%Y-%m-%d')
+            #df_display["확인일자"] = pd.to_datetime(df_display["확인일자"], errors='coerce').dt.strftime('%Y-%m-%d')
 
             # CSS 스타일을 정의하여 컬럼 간의 간격을 조절
             st.markdown(
