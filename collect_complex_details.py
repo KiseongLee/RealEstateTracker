@@ -31,6 +31,8 @@ if __name__ == "__main__":
             longitude = marker_info['longitude']
             completionYearMonth = marker_info['completionYearMonth'] # 연식
             totalHouseholdCount = marker_info['totalHouseholdCount'] # 총 세대수
+            divisionName = marker_info['divisionName'] # 구
+            cortarName = marker_info['cortarName'] # 동
 
             for page in range(1, 1000):  # 필요한 경우 최대 페이지 수 조정
                 details = fetch_complex_details(complex_no, page)
@@ -42,6 +44,8 @@ if __name__ == "__main__":
                         detail['longitude'] = longitude   # longitude 추가
                         detail['completionYearMonth'] = completionYearMonth # 연식 추가
                         detail['totalHouseholdCount'] = totalHouseholdCount # 총 세대수 추가
+                        detail['divisionName'] = divisionName
+                        detail['cortarName'] = cortarName
                     area_complex_details.extend(details)
                     print(f"Successfully retrieved data for complex {complex_no}, area {area_name}, page {page}. Number of articles: {len(details)}")
                 else:

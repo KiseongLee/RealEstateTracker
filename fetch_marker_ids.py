@@ -12,7 +12,7 @@ def calculate_bounds(vertices):
     topLat = max(lats)
     return leftLon, rightLon, topLat, bottomLat
 
-def fetch_marker_info(cortars_info):
+def fetch_marker_info(cortars_info, divisionName, cortarName):
     cortarNo = cortars_info.get('cortarNo')
     cortarZoom = cortars_info.get('cortarZoom')
     cortarVertexLists = cortars_info.get('cortarVertexLists', [[]])
@@ -80,7 +80,9 @@ def fetch_marker_info(cortars_info):
                         'latitude': item['latitude'],
                         'longitude': item['longitude'],
                         'completionYearMonth': item['completionYearMonth'],
-                        'totalHouseholdCount': item['totalHouseholdCount']
+                        'totalHouseholdCount': item['totalHouseholdCount'],
+                        'divisionName': divisionName,
+                        'cortarName': cortarName
                     }
                     marker_info_list.append(marker_info)
 
@@ -106,11 +108,13 @@ if __name__ == "__main__":
     all_marker_info = {}
 
     for cortars_info in cortars_data:
-        cortar_name = f"{cortars_info.get('divisionName', 'Unknown')} {cortars_info.get('cortarName', 'Unknown')}"
+        divisionName = cortars_info.get('divisionName', 'Unknown')
+        cortarName = cortars_info.get('cortarName', 'Unknown')
+        cortar_name = f"{divisionName} {cortarName}"
         cortar_no = cortars_info.get('cortarNo')
         
         if cortar_no:
-            marker_info_list = fetch_marker_info(cortars_info)
+            marker_info_list = fetch_marker_info(cortars_info, divisionName, cortarName)
             if marker_info_list:
                 all_marker_info[cortar_name] = marker_info_list
                 print(f"Marker information for cortarNo {cortar_no} ({cortar_name}):")

@@ -30,25 +30,125 @@ st.markdown("이 앱은 네이버 부동산 API를 사용하여 특정 좌표에
 current_date = datetime.now().strftime('%Y%m%d')
 
 # 세션 상태 초기화
-if 'last_coords' not in st.session_state:
-    st.session_state['last_coords'] = None
-if 'data_loaded' not in st.session_state:
-    st.session_state['data_loaded'] = False
-if 'current_data' not in st.session_state:
-    st.session_state['current_data'] = None
-if 'dong_name' not in st.session_state:
-    st.session_state['dong_name'] = None
-if 'is_processing' not in st.session_state:
-    st.session_state['is_processing'] = False
-if 'prev_last_clicked' not in st.session_state:
-    st.session_state['prev_last_clicked'] = None  # 이전 클릭 위치 저장
-    
+session_keys = [
+    'last_coords', 'data_loaded', 'current_data',
+    'dong_name', 'is_processing', 'prev_last_clicked', 'selected_areas'
+]
+for key in session_keys:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != 'selected_areas' else {}
+        
 # 지도 생성 및 표시
 def create_folium_map():
     default_location = [37.5665, 126.9780]  # 서울 중심부 좌표
     m = folium.Map(location=default_location, zoom_start=11)
     m.add_child(folium.LatLngPopup())  # 좌표 클릭 이벤트 설정
     return m
+# ▼▼▼ 기존 to_excel() 함수 밖에 추가 ▼▼▼
+def format_eok(val):
+    """
+    숫자를 억 단위와 천만 단위로 변환하여 문자열로 반환합니다.
+    - 1억 미만: 2000 → "2,000"
+    - 1억 이상: 250000000 → "2억 5,000"
+    - 음수: -150000000 → "-1억 5,000"
+    """
+    if pd.isna(val):
+        return ""
+    
+    sign = "-" if val < 0 else ""
+    abs_val = abs(val)
+    
+    eok = int(abs_val // 100_000_000)
+    remainder = int((abs_val % 100_000_000) // 10_000)
+
+    # 1억 미만 처리
+    if eok == 0:
+        return f"{sign}{remainder:,}" if remainder != 0 else "0"
+    
+    # 1억 이상 처리
+    return (
+        f"{sign}{eok}억 {remainder:,}"
+        if remainder > 0
+        else f"{sign}{eok}억"
+    )
+def export_combined_excel(selected_data, current_date):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # 1. 표지 시트 생성 ▼▼▼ 키 구조 수정
+        cover_data = []
+        #pprint.pprint(selected_data.items())
+        for (division, dong, exclude_low_floors), data in selected_data.items():
+            detail_df = data['detail']
+            display_name = f"{division} {dong}{'_저층제외' if exclude_low_floors else ''}"
+            
+            cover_data.append({
+                '지역명': display_name,
+                '매매 개수': len(detail_df[detail_df['거래유형'] == '매매']),
+                '전세 개수': len(detail_df[detail_df['거래유형'] == '전세']),
+                '총 데이터 수': len(detail_df)
+            })
+        # ▲▲▲ 수정 완료 ▲▲▲
+
+        # 2. 개별 상세 시트 생성 ▼▼▼ 키 구조 수정
+        for (division, dong, exclude_low_floors), data in selected_data.items():
+            base_name = f"{division}_{dong}_{current_date}"
+            if exclude_low_floors:
+                base_name += "_저층제외"
+            data['detail'].to_excel(writer, sheet_name=f"{base_name}_상세", index=False)
+        # ▲▲▲ 수정 완료 ▲▲▲
+
+        # 3. 통합 요약 시트 생성 ▼▼▼ 키 구조 수정
+        all_summaries = []
+        with open('all_marker_info.json', 'r', encoding='utf-8') as f:
+            marker_info = json.load(f)
+        
+        for (division, dong, exclude_low_floors), data in selected_data.items():
+            summary_df = data['summary'].copy()
+            
+            # 지역 정보 매핑 ▼▼▼ 더 정확한 매칭
+            matched = False
+            for marker_key in marker_info:
+                if division in marker_key and dong in marker_key:
+                    matched = True
+                    break
+            
+            # 컬럼 추가
+            summary_df.insert(0, '구분', division)
+            summary_df.insert(1, '동', dong)
+            # 포맷팅 적용
+            format_cols = [
+                '매매평균', '매매중간', '매매최대', '매매최소',
+                '전세평균', '전세중간', '전세최대', '전세최소',
+                '갭(매매-전세)(평균)'
+            ]
+            for col in format_cols:
+                summary_df[col] = summary_df[col].apply(format_eok)
+            
+            all_summaries.append(summary_df)
+        
+        # 모든 요약 병합
+        if all_summaries:
+            combined_summary = pd.concat(all_summaries, ignore_index=True)
+            combined_summary.to_excel(
+                writer, 
+                sheet_name=f"요약 데이터_{current_date}",
+                index=False
+            )
+
+        # 4. 하이퍼링크 설정 (기존 코드 유지)
+        workbook = writer.book
+        for (division, dong, exclude_low_floors), data in selected_data.items():  # 3개 요소 언패킹
+            base_name = f"{division}_{dong}_{current_date}"
+            if exclude_low_floors:
+                base_name += "_저층제외"
+                
+            worksheet = writer.sheets[f"{base_name}_상세"]
+            if "매물 링크" in data['detail'].columns:
+                link_col_idx = data['detail'].columns.get_loc("매물 링크")
+                for row_num, link in enumerate(data['detail']["매물 링크"], start=1):
+                    worksheet.write_url(row_num, link_col_idx, link, string='매물링크')
+            
+    return output.getvalue()
 
 # 세 개의 열을 생성하고, 비율을 설정합니다.
 left_column, center_column, right_column = st.columns([1, 2, 1])  # 비율은 원하는 대로 조정 가능
@@ -57,7 +157,48 @@ with center_column:
     m = create_folium_map()
     map_html = st_folium(m, width=1000, height=500, key='my_map',  # 고정된 키 값 설정
     returned_objects=['last_clicked'])
+    
+# ▼▼▼ 추가할 코드 ▼▼▼ (right_column 내부)
+with right_column:
+    st.markdown("### 🗂️ 선택된 지역 목록")
+    
+    if st.session_state.selected_areas:
+        # ▼▼▼ 수정된 부분: divisionName과 cortarName 조합 표시 ▼▼▼
+        display_names = []
+        for (division, dong, exclude_low_floors) in st.session_state.selected_areas.keys():
+        
+            display_names.append(f"{division} {dong}{'_저층제외' if exclude_low_floors else ''}")
 
+        selected_idx = st.selectbox("저장된 지역 선택", range(len(display_names)), format_func=lambda x: display_names[x])
+        # ▲▲▲ 수정 완료 ▲▲▲
+        
+        cols = st.columns([0.5,0.5])
+        with cols[0]:
+            if st.button("🗑️ 선택 삭제"):
+                selected_key = list(st.session_state.selected_areas.keys())[selected_idx]
+                del st.session_state.selected_areas[selected_key]
+                st.rerun()  
+        with cols[1]:
+            if st.button("🧹 전체 초기화"):
+                st.session_state.selected_areas = {}
+                st.rerun()  
+                
+        # ▼▼▼ 추가된 리포트 생성 및 다운로드 버튼 ▼▼▼
+        if st.button("📊 종합 리포트 생성"):
+            try:
+                excel_data = export_combined_excel(
+                    st.session_state.selected_areas,
+                    current_date
+                )
+                st.download_button(
+                    label="⬇️ 종합 리포트 다운로드",
+                    data=excel_data,
+                    file_name=f"종합_부동산_분석_{current_date}.xlsx",
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
+            except Exception as e:
+                st.error(f"리포트 생성 실패: {str(e)}")
+        # ▲▲▲ 추가 완료 ▲▲▲
 # 좌표 처리 및 데이터 가져오기 함수
 def save_coordinates(coords):
     with open('clicked_coords.json', 'w') as f:
@@ -135,28 +276,25 @@ def extract_numeric_area(area_str):
         return float(match.group())  # 숫자를 float으로 변환
     return None  # 숫자가 없으면 None 반환
 
-# 엑셀로 저장하는 함수
-def to_excel(df):
-    # 요약 데이터 생성을 위해 복사본 생성
+# 요약 데이터 함수
+def create_summary(df):
+    """상세 데이터프레임에서 요약 데이터 생성"""
     df_summary = df.copy()
     
-    # 가격을 숫자로 변환하여 집계에 사용
+    # 가격 변환
     df_summary['가격_숫자'] = df_summary['가격'].apply(convert_price_to_number)
     
-    # 공급면적에서 숫자만 추출하여 '평형' 계산 (공급면적 m² -> 평, 1평 ≈ 3.3 m²)
+    # 공급면적 처리
     df_summary["공급면적_숫자"] = df_summary["공급면적"].apply(extract_numeric_area)
-    df_summary["평형"] = (df_summary["공급면적_숫자"] / 3.3).round(1)  # 소수점 한 자리로 반올림
-    
-    # cpName이 "한국공인중개사협회"인 행은 집계 계산에서 제외 (중복 매물이 많음)
+    df_summary["평형"] = (df_summary["공급면적_숫자"] / 3.3).round(1)
+
+    # CP사 필터링
     if "CP사" in df_summary.columns:
         df_filtered = df_summary[df_summary["CP사"] != "한국공인중개사협회"]
     else:
         df_filtered = df_summary.copy()
-    
-    # 원데이터 df에 "연식", "총세대수" 컬럼이 있다고 가정합니다.
-    # 따라서 이 컬럼들을 그룹바이 키에 포함하여 요약 데이터에 추가합니다.
-    
-    # 매매 데이터 집계 (필터링된 데이터 사용)
+
+    # 매매/전세 집계
     sale_df = df_filtered[df_filtered["거래유형"] == "매매"].groupby(
         ["매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
     ).agg(
@@ -166,7 +304,6 @@ def to_excel(df):
         매매최소=("가격_숫자", "min")
     )
 
-    # 전세 데이터 집계 (필터링된 데이터 사용)
     jeonse_df = df_filtered[df_filtered["거래유형"] == "전세"].groupby(
         ["매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
     ).agg(
@@ -176,100 +313,65 @@ def to_excel(df):
         전세최소=("가격_숫자", "min")
     )
 
-    # 매매와 전세 매물 개수 계산
+    # 매물 개수 계산
     sale_count = df_filtered[df_filtered['거래유형'] == '매매'] \
         .groupby(["매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='매매개수')
     jeonse_count = df_filtered[df_filtered['거래유형'] == '전세'] \
         .groupby(["매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='전세개수')
 
-    # 매매 데이터와 전세 데이터를 병합 (병합 키에 "연식", "총세대수" 추가)
+    # 데이터 병합
     summary_df = pd.merge(sale_df, jeonse_df, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="outer")
-    # 매물 개수를 병합
     summary_df = pd.merge(summary_df, sale_count, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
     summary_df = pd.merge(summary_df, jeonse_count, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
     
-    # 갭(매매 평균값 - 전세 평균값) 계산 (전세 데이터가 없으면 NaN 처리)
+    # 갭 계산
     summary_df["갭(매매-전세)(평균)"] = summary_df["매매평균"] - summary_df["전세평균"]
     
-    # 컬럼 이름 변경 및 순서 조정 (여기서 "연식"과 "총세대수"를 추가했습니다)
+    # 컬럼 정리
     summary_df = summary_df.rename(columns={"매물명": "아파트명"})
-    summary_df = summary_df[
+    return summary_df[
         [
-            "아파트명",
-            "연식",       
-            "총세대수",  
-            "공급면적",
-            "평형",
-            "매매개수",
-            "전세개수",
-            "매매평균",
-            "매매중간",
-            "매매최대",
-            "매매최소",
-            "전세평균",
-            "전세중간",
-            "전세최대",
-            "전세최소",
-            "갭(매매-전세)(평균)"
+            "아파트명", "연식", "총세대수", "공급면적", "평형",
+            "매매개수", "전세개수", "매매평균", "매매중간",
+            "매매최대", "매매최소", "전세평균", "전세중간",
+            "전세최대", "전세최소", "갭(매매-전세)(평균)"
         ]
     ]
+
+def to_excel(df, area_name, current_date, exclude_low_floors):
+    # 요약 데이터 생성 (create_summary 호출)
+    summary_df = create_summary(df)
     
-    # 요약 데이터의 가격 값들을 억 단위로 변환하는 함수
-    def format_eok(val):
-        """
-        숫자를 억 단위와 천만 단위로 변환하여 문자열로 반환합니다.
-        예: 2,550,000,000 -> 25억 5000
-            2,505,000,000 -> 25억 500
-        """
-        if pd.isna(val):
-            return ""
-        
-        sign = "-" if val < 0 else ""
-        abs_val = abs(val)
-        
-        eok = int(abs_val // 100_000_000)
-        remainder = int((abs_val % 100_000_000) // 10_000)  
-        
-        # 1억 미만 처리
-        if eok == 0:
-            return f"{sign}{remainder:,}" if remainder != 0 else "0"
-        
-        # 1억 이상 처리
-        return (
-            f"{sign}{eok}억 {remainder:,}"
-            if remainder > 0
-            else f"{sign}{eok}억"
-        )
-            
-    # 변환할 컬럼 목록 (매매/전세 관련 값과 갭)
+    # 숫자 포맷팅 적용
     format_cols = ['매매평균', '매매중간', '매매최대', '매매최소',
                     '전세평균', '전세중간', '전세최대', '전세최소',
                     '갭(매매-전세)(평균)']
-    
     for col in format_cols:
         summary_df[col] = summary_df[col].apply(format_eok)
     
-    # 엑셀 파일 생성 (Sheet1: 상세 데이터, Sheet2: 요약 데이터)
+    # ▼▼▼ 시트 이름 생성 로직 ▼▼▼
+    base_name = f"{area_name}_{current_date}"
+    if exclude_low_floors:
+        base_name += "_저층제외"
+    
+    sheet1_name = f"{base_name}_상세"
+    sheet2_name = f"{base_name}_요약"
+    
+    # 엑셀 파일 생성
     output = BytesIO()
-    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet1_name)
+        summary_df.to_excel(writer, index=False, sheet_name=sheet2_name)
+        
+        # 하이퍼링크 설정
+        workbook = writer.book
+        worksheet = writer.sheets[sheet1_name]
+        if "매물 링크" in df.columns:
+            link_col_idx = df.columns.get_loc("매물 링크")
+            for row_num, link in enumerate(df["매물 링크"], start=1):
+                worksheet.write_url(row_num, link_col_idx, link, string='매물 링크')
     
-    # Sheet1에 상세 데이터 저장
-    df.to_excel(writer, index=False, sheet_name='Sheet1')
-    
-    # Sheet2에 요약 데이터 저장
-    summary_df.to_excel(writer, index=False, sheet_name='Sheet2')
-    
-    # Sheet1에서 매물 링크를 하이퍼링크로 설정 (있을 경우)
-    workbook = writer.book
-    worksheet = writer.sheets['Sheet1']
-    if "매물 링크" in df.columns:
-        link_col_idx = df.columns.get_loc("매물 링크")  # 매물 링크 컬럼의 인덱스 찾기
-        for row_num, link in enumerate(df["매물 링크"], start=1):
-            worksheet.write_url(row_num, link_col_idx, link, string='매물 링크')
-    
-    writer.close()
-    processed_data = output.getvalue()
-    return processed_data
+    return output.getvalue()
 
 # CSV로 저장하는 함수
 def to_csv_with_links(df):
@@ -601,7 +703,7 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
 
                 # 다운로드 버튼 설정
                 csv_data = to_csv_with_links(df_display_for_show).encode('utf-8-sig')
-                excel_data = to_excel(df_display_for_show)
+                excel_data = to_excel(df_display_for_show, area_name, current_date, exclude_low_floors)
             
                 # 다운로드 버튼 배치 (element_cols 내부에서)
                 with element_cols[2]:
@@ -624,6 +726,48 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
 
             # 데이터프레임을 표시
             display_table_with_aggrid(df_display_for_show)
+            # ▼▼▼ 추가할 코드 (데이터 표시 하단) ▼▼▼
+            st.markdown("---")  # 구분선 추가
+            button_cols = st.columns(2)
+            with button_cols[0]:
+                if st.button(f"📥 {area_name} 추가", key=f'add_{area_name}'):
+                    # ▼▼▼ divisionName과 cortarName 조회 추가 ▼▼▼
+                    division, dong = "Unknown", "Unknown"
+                    with open('all_marker_info.json', 'r', encoding='utf-8') as f:
+                        marker_info = json.load(f)
+                        for marker_key in marker_info:
+                            if area_name in marker_key:
+                                division = marker_info[marker_key][0].get('divisionName', 'Unknown')
+                                dong = marker_info[marker_key][0].get('cortarName', 'Unknown')
+                                break
+                    
+                    # 고유 키 생성 방식 변경 ▼▼▼
+                    unique_key = (division, dong, exclude_low_floors)
+                    if unique_key not in st.session_state.selected_areas:
+                        summary_df = create_summary(df_display_for_show)
+                        st.session_state.selected_areas[unique_key] = {
+                            'detail': df_display_for_show,
+                            'summary': summary_df
+                        }
+                        st.rerun()
+
+            with button_cols[1]:
+                if st.button(f"📤 {area_name} 제거", key=f'remove_{area_name}'):
+                    # 고유 키 추출 방식 변경 ▼▼▼
+                    division, dong = "Unknown", "Unknown"
+                    with open('all_marker_info.json', 'r', encoding='utf-8') as f:
+                        marker_info = json.load(f)
+                        for marker_key in marker_info:
+                            if area_name in marker_key:
+                                division = marker_info[marker_key][0].get('divisionName', 'Unknown')
+                                dong = marker_info[marker_key][0].get('cortarName', 'Unknown')
+                                break
+                    
+                    unique_key = (division, dong, exclude_low_floors)
+                    if unique_key in st.session_state.selected_areas:
+                        del st.session_state.selected_areas[unique_key]
+                        st.rerun()
+            # ▲▲▲ 추가할 코드 ▲▲▲
         else:
             st.write(f"{area_name}에 대한 데이터가 없습니다.")
 else:
