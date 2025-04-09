@@ -87,6 +87,8 @@ def export_combined_excel(selected_data, current_date):
                 '전세 개수': len(detail_df[detail_df['거래유형'] == '전세']),
                 '총 데이터 수': len(detail_df)
             })
+            pd.DataFrame(cover_data).to_excel(writer, sheet_name='종합 리포트', index=False)
+
         # ▲▲▲ 수정 완료 ▲▲▲
 
         # 2. 개별 상세 시트 생성 ▼▼▼ 키 구조 수정
@@ -104,31 +106,31 @@ def export_combined_excel(selected_data, current_date):
         
         for (division, dong, exclude_low_floors), data in selected_data.items():
             summary_df = data['summary'].copy()
-            
-            # 지역 정보 매핑 ▼▼▼ 더 정확한 매칭
-            matched = False
-            for marker_key in marker_info:
-                if division in marker_key and dong in marker_key:
-                    matched = True
-                    break
-            
             # 컬럼 추가
-            summary_df.insert(0, '구분', division)
+            summary_df.insert(0, '구', division)
             summary_df.insert(1, '동', dong)
-            # 포맷팅 적용
-            format_cols = [
-                '매매평균', '매매중간', '매매최대', '매매최소',
-                '전세평균', '전세중간', '전세최대', '전세최소',
-                '갭(매매-전세)(평균)'
-            ]
-            for col in format_cols:
-                summary_df[col] = summary_df[col].apply(format_eok)
-            
             all_summaries.append(summary_df)
+        
+        combined_summary = pd.concat(all_summaries, ignore_index=True)
+
+        # 갭 기준 오름차순 정렬 (숫자 처리)
+        combined_summary = combined_summary.sort_values(
+            by='갭(매매-전세)(평균)', 
+            ascending=True
+        )
+            
+        # 포맷팅 적용
+        format_cols = [
+            '매매평균', '매매중간', '매매최대', '매매최소',
+            '전세평균', '전세중간', '전세최대', '전세최소',
+            '갭(매매-전세)(평균)'
+        ]
+        for col in format_cols:
+            combined_summary[col] = combined_summary[col].apply(format_eok)
+            
         
         # 모든 요약 병합
         if all_summaries:
-            combined_summary = pd.concat(all_summaries, ignore_index=True)
             combined_summary.to_excel(
                 writer, 
                 sheet_name=f"요약 데이터_{current_date}",
