@@ -101,18 +101,30 @@ def export_combined_excel(selected_data, current_date):
 
         # 3. 통합 요약 시트 생성 ▼▼▼ 키 구조 수정
         all_summaries = []
-        with open('all_marker_info.json', 'r', encoding='utf-8') as f:
-            marker_info = json.load(f)
+        
         
         for (division, dong, exclude_low_floors), data in selected_data.items():
             summary_df = data['summary'].copy()
-            # 컬럼 추가
-            summary_df.insert(0, '구', division)
-            summary_df.insert(1, '동', dong)
+
             all_summaries.append(summary_df)
         
-        combined_summary = pd.concat(all_summaries, ignore_index=True)
-
+        # 모든 요약 병합 (데이터가 있을 경우에만 진행)
+        if all_summaries:
+            combined_summary = pd.concat(all_summaries, ignore_index=True)
+            # 4. 통합 요약 데이터에서 중복 제거 - 중복 판단 기준 컬럼 정의 (create_summary에서 반환하는 컬럼)
+            duplicate_check_columns = [
+                "아파트명", "연식", "총세대수", "공급면적", "평형",
+                "매매개수", "전세개수", "매매평균", "매매중간",
+                "매매최대", "매매최소", "전세평균", "전세중간",
+                "전세최대", "전세최소", "갭(매매-전세)(평균)"
+            ]
+            # combined_summary에 실제로 존재하는 컬럼만으로 subset 구성
+            subset_cols = [col for col in duplicate_check_columns if col in combined_summary.columns]
+            
+            if subset_cols: # 비교할 컬럼이 있을 경우에만 중복 제거 수행
+                combined_summary = combined_summary.drop_duplicates(subset=subset_cols, keep='first')
+        # ▲▲▲ 중복 제거 완료 ▲▲▲
+        
         # 갭 기준 오름차순 정렬 (숫자 처리)
         combined_summary = combined_summary.sort_values(
             by='갭(매매-전세)(평균)', 
@@ -137,7 +149,7 @@ def export_combined_excel(selected_data, current_date):
                 index=False
             )
 
-        # 4. 하이퍼링크 설정 (기존 코드 유지)
+        # 5. 하이퍼링크 설정 (기존 코드 유지)
         workbook = writer.book
         for (division, dong, exclude_low_floors), data in selected_data.items():  # 3개 요소 언패킹
             base_name = f"{division}_{dong}_{current_date}"
@@ -283,6 +295,21 @@ def create_summary(df):
     """상세 데이터프레임에서 요약 데이터 생성"""
     df_summary = df.copy()
     
+    # --- 필수 컬럼 확인 ---
+    # create_summary가 호출되기 전에 df_summary에 'divisionName', 'cortarName'이 있는지 확인하는 것이 좋습니다.
+    # 만약 없다면, 이 함수를 호출하기 전에 미리 병합해야 합니다.
+    required_cols = ['구', '동', '매물명', '공급면적', '가격', '거래유형', '연식', '총세대수']
+    if not all(col in df_summary.columns for col in required_cols):
+        missing = [col for col in required_cols if col not in df_summary.columns]
+        st.error(f"요약 생성 오류: 상세 데이터에 다음 필수 컬럼이 없습니다: {', '.join(missing)}")
+        # 빈 데이터프레임 또는 기본 구조를 반환할 수 있습니다.
+        return pd.DataFrame(columns=[
+            "구", "동", "아파트명", "연식", "총세대수", "공급면적", "평형",
+            "매매개수", "전세개수", "매매평균", "매매중간", "매매최대", "매매최소",
+            "전세평균", "전세중간", "전세최대", "전세최소", "갭(매매-전세)(평균)"
+        ])
+    # --- 컬럼 확인 끝 ---
+    
     # 가격 변환
     df_summary['가격_숫자'] = df_summary['가격'].apply(convert_price_to_number)
     
@@ -298,7 +325,7 @@ def create_summary(df):
 
     # 매매/전세 집계
     sale_df = df_filtered[df_filtered["거래유형"] == "매매"].groupby(
-        ["매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
+        ["구","동","매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
     ).agg(
         매매평균=("가격_숫자", "mean"),
         매매중간=("가격_숫자", "median"),
@@ -307,7 +334,7 @@ def create_summary(df):
     )
 
     jeonse_df = df_filtered[df_filtered["거래유형"] == "전세"].groupby(
-        ["매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
+        ["구","동","매물명", "공급면적", "평형", "연식", "총세대수"], as_index=False
     ).agg(
         전세평균=("가격_숫자", "mean"),
         전세중간=("가격_숫자", "median"),
@@ -317,28 +344,31 @@ def create_summary(df):
 
     # 매물 개수 계산
     sale_count = df_filtered[df_filtered['거래유형'] == '매매'] \
-        .groupby(["매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='매매개수')
+        .groupby(["구","동","매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='매매개수')
     jeonse_count = df_filtered[df_filtered['거래유형'] == '전세'] \
-        .groupby(["매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='전세개수')
+        .groupby(["구","동","매물명", "공급면적", "평형", "연식", "총세대수"]).size().reset_index(name='전세개수')
 
     # 데이터 병합
-    summary_df = pd.merge(sale_df, jeonse_df, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="outer")
-    summary_df = pd.merge(summary_df, sale_count, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
-    summary_df = pd.merge(summary_df, jeonse_count, on=["매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
+    summary_df = pd.merge(sale_df, jeonse_df, on=["구","동","매물명", "공급면적", "평형", "연식", "총세대수"], how="outer")
+    summary_df = pd.merge(summary_df, sale_count, on=["구","동","매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
+    summary_df = pd.merge(summary_df, jeonse_count, on=["구","동","매물명", "공급면적", "평형", "연식", "총세대수"], how="left")
     
     # 갭 계산
     summary_df["갭(매매-전세)(평균)"] = summary_df["매매평균"] - summary_df["전세평균"]
-    
+        
     # 컬럼 정리
     summary_df = summary_df.rename(columns={"매물명": "아파트명"})
-    return summary_df[
-        [
-            "아파트명", "연식", "총세대수", "공급면적", "평형",
-            "매매개수", "전세개수", "매매평균", "매매중간",
-            "매매최대", "매매최소", "전세평균", "전세중간",
-            "전세최대", "전세최소", "갭(매매-전세)(평균)"
-        ]
+    # ▼▼▼ 최종 반환 컬럼 리스트에 '구', '동' 포함 ▼▼▼
+    final_columns = [
+        "구", "동", "아파트명", "연식", "총세대수", "공급면적", "평형",
+        "매매개수", "전세개수", "매매평균", "매매중간",
+        "매매최대", "매매최소", "전세평균", "전세중간",
+        "전세최대", "전세최소", "갭(매매-전세)(평균)"
     ]
+    existing_final_columns = [col for col in final_columns if col in summary_df.columns]
+    summary_df = summary_df[existing_final_columns] # 컬럼 순서 및 존재 여부 확인 후 반환
+
+    return summary_df
 
 def to_excel(df, area_name, current_date, exclude_low_floors):
     # 요약 데이터 생성 (create_summary 호출)
@@ -570,9 +600,10 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
     for area_name, area_data in complex_details_by_district.items():
         if area_data:
             df = pd.DataFrame(area_data)
-        
+
             # 필요한 컬럼이 있는지 확인
-            required_columns = ['markerId', 'latitude', 'longitude', 'articleNo']
+            required_columns = ['markerId', 'latitude', 'longitude', 'articleNo',
+                                'divisionName', 'cortarName']
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
                 st.error(f"다음 컬럼이 데이터에 없습니다: {', '.join(missing_columns)}. 데이터를 다시 불러와주세요.")
@@ -587,6 +618,8 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
             display_columns = [
                 "articleName",
                 # 총세대수, 연식 추가
+                "divisionName",
+                "cortarName",
                 "completionYearMonth",
                 "totalHouseholdCount",
                 "buildingName",
@@ -613,6 +646,8 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
             # 컬럼 이름을 한글로 변경
             df_display = df_display.rename(columns={
                 "articleName": "매물명",
+                "divisionName": "구",
+                "cortarName": "동",
                 # 총세대수, 연식 추가
                 "completionYearMonth": "연식",
                 "totalHouseholdCount": "총세대수",
@@ -728,49 +763,45 @@ elif st.session_state.get('data_loaded') and st.session_state.get('current_data'
 
             # 데이터프레임을 표시
             display_table_with_aggrid(df_display_for_show)
-            # ▼▼▼ 추가할 코드 (데이터 표시 하단) ▼▼▼
-            st.markdown("---")  # 구분선 추가
-            button_cols = st.columns(2)
-            with button_cols[0]:
-                if st.button(f"📥 {area_name} 추가", key=f'add_{area_name}'):
-                    # ▼▼▼ divisionName과 cortarName 조회 추가 ▼▼▼
-                    division, dong = "Unknown", "Unknown"
-                    with open('all_marker_info.json', 'r', encoding='utf-8') as f:
-                        marker_info = json.load(f)
-                        for marker_key in marker_info:
-                            if area_name in marker_key:
-                                division = marker_info[marker_key][0].get('divisionName', 'Unknown')
-                                dong = marker_info[marker_key][0].get('cortarName', 'Unknown')
-                                break
-                    
-                    # 고유 키 생성 방식 변경 ▼▼▼
-                    unique_key = (division, dong, exclude_low_floors)
-                    if unique_key not in st.session_state.selected_areas:
-                        summary_df = create_summary(df_display_for_show)
-                        st.session_state.selected_areas[unique_key] = {
-                            'detail': df_display_for_show,
-                            'summary': summary_df
-                        }
-                        st.rerun()
+        # ▼▼▼ 수정된 '지역 추가' 버튼 로직 ▼▼▼
+        st.markdown("---")  # 구분선 추가
+        button_cols = st.columns(2)
+        with button_cols[0]:
+            if st.button(f"📥 {area_name} 추가", key=f'add_{area_name}'):
+            
+                # ▼▼▼ area_name에서 division과 dong 직접 추출 ▼▼▼
+                division, dong = "Unknown", "Unknown"  # 기본값 설정
+                if ' ' in area_name:  # area_name에 공백이 있는지 확인
+                    parts = area_name.split(' ', 1) # 첫 번째 공백을 기준으로 최대 1번 분리
+                    if len(parts) == 2: # 정확히 두 부분으로 나뉘었는지 확인
+                        division = parts[0]  # 첫 번째 부분 (예: "하남시")
+                        dong = parts[1]      # 두 번째 부분 (예: "망월동")
+                    else:
+                        st.warning(f"'{area_name}' 형식을 처리할 수 없습니다. 기본값 'Unknown'을 사용합니다.")
+                else:
+                    st.warning(f"'{area_name}'에 시/구와 동을 구분하는 공백이 없습니다. 기본값 'Unknown'을 사용합니다.")
+                # ▲▲▲ 추출 완료 ▲▲▲
 
-            with button_cols[1]:
-                if st.button(f"📤 {area_name} 제거", key=f'remove_{area_name}'):
-                    # 고유 키 추출 방식 변경 ▼▼▼
-                    division, dong = "Unknown", "Unknown"
-                    with open('all_marker_info.json', 'r', encoding='utf-8') as f:
-                        marker_info = json.load(f)
-                        for marker_key in marker_info:
-                            if area_name in marker_key:
-                                division = marker_info[marker_key][0].get('divisionName', 'Unknown')
-                                dong = marker_info[marker_key][0].get('cortarName', 'Unknown')
-                                break
-                    
-                    unique_key = (division, dong, exclude_low_floors)
-                    if unique_key in st.session_state.selected_areas:
-                        del st.session_state.selected_areas[unique_key]
+                unique_key = (division, dong, exclude_low_floors) # 이것이 세션 키
+                # ▲▲▲ 키 생성 완료 ▲▲▲
+
+                if unique_key not in st.session_state.selected_areas:
+                    # ▼▼▼ create_summary 호출 시 '구', '동' 포함된 데이터 전달 ▼▼▼
+                    # df_display_for_show는 filter_out_low_floors의 결과로, '구', '동' 컬럼을 포함해야 함
+                    summary_df = create_summary(df_display_for_show)
+                    # ▲▲▲ 전달 데이터 확인 ▲▲▲
+
+                    if summary_df.empty and not df_display_for_show.empty: # 요약 생성 실패 시 (df는 있는데 summary가 비었으면)
+                        st.error(f"'{area_name}' 요약 데이터 생성 중 오류 발생. 입력 데이터 확인 필요.")
+                    else:
+                        st.session_state.selected_areas[unique_key] = {
+                            'detail': df_display_for_show, # 상세 데이터 ('구', '동' 포함)
+                            'summary': summary_df   # 요약 데이터 ('구', '동' 포함)
+                        }
+                        # UI 표시용 이름은 키에서 가져옴
+                        st.success(f"'{division} {dong}{' (저층 제외)' if exclude_low_floors else ''}' 지역 그룹이 추가되었습니다.")
                         st.rerun()
-            # ▲▲▲ 추가할 코드 ▲▲▲
-        else:
-            st.write(f"{area_name}에 대한 데이터가 없습니다.")
+                else:
+                    st.warning(f"'{division} {dong}{' (저층 제외)' if exclude_low_floors else ''}' 지역 그룹은 이미 추가되어 있습니다.")
 else:
     st.write("지도를 클릭하여 좌표를 선택하세요.")
