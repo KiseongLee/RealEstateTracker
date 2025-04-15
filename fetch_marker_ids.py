@@ -2,6 +2,8 @@ import requests
 import json
 import pprint
 from config import cookies, headers  # config.py에서 쿠키와 헤더 가져오기
+import streamlit as st
+import time
 
 def calculate_bounds(vertices):
     lons = [point[1] for point in vertices]
@@ -11,8 +13,36 @@ def calculate_bounds(vertices):
     bottomLat = min(lats)
     topLat = max(lats)
     return leftLon, rightLon, topLat, bottomLat
-
-def fetch_marker_info(cortars_info, divisionName, cortarName):
+# ▼▼▼ 추가: 좌표 → 행정동 변환 함수 ▼▼▼
+def reverse_geocode(lat, lng):
+    try:
+        url = "https://maps.apigw.ntruss.com/map-reversegeocode/v2/gc"
+        params = {
+            "coords": f"{lng},{lat}",
+            "output": "json",
+            "orders": "legalcode"
+        }
+        # ▼▼▼ 수정 코드 ▼▼▼ (secrets.toml 구조에 맞춤)
+        headers = {
+            "X-NCP-APIGW-API-KEY-ID": st.secrets["naver"]["client_id"],
+            "X-NCP-APIGW-API-KEY": st.secrets["naver"]["client_secret"]
+        }
+        
+        response = requests.get(url, params=params, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        if data["status"]["code"] == 0:
+            return (
+                data["results"][0]["region"]["area2"]["name"],  # 구
+                data["results"][0]["region"]["area3"]["name"]   # 동
+            )
+        return ("Unknown", "Unknown")
+    except Exception as e:
+        st.error(f"역지오코딩 실패: {str(e)}")
+        return ("Unknown", "Unknown")
+    
+def fetch_marker_info(cortars_info):
     cortarNo = cortars_info.get('cortarNo')
     cortarZoom = cortars_info.get('cortarZoom')
     cortarVertexLists = cortars_info.get('cortarVertexLists', [[]])
@@ -20,6 +50,7 @@ def fetch_marker_info(cortars_info, divisionName, cortarName):
     # Calculate the bounds (leftLon, rightLon, topLat, bottomLat)
     if cortarVertexLists and cortarVertexLists[0]:
         leftLon, rightLon, topLat, bottomLat = calculate_bounds(cortarVertexLists[0])
+    
     else:
         print(f"Invalid cortarVertexLists data for cortarNo: {cortarNo}")
         return None
@@ -65,6 +96,7 @@ def fetch_marker_info(cortars_info, divisionName, cortarName):
         headers=headers
     )
 
+    
     print(f"Fetching marker IDs for cortarNo: {cortarNo} - HTTP status code: {response.status_code}")
 
     if response.status_code == 200:
@@ -75,6 +107,13 @@ def fetch_marker_info(cortars_info, divisionName, cortarName):
             marker_info_list = []
             for item in response_data:
                 if 'markerId' in item and 'latitude' in item and 'longitude' in item:
+                    
+                    # ▼▼▼ 역지오코딩 수행 ▼▼▼
+                    lat = item['latitude']
+                    lng = item['longitude']
+                    divisionName, cortarName = reverse_geocode(lat, lng)
+                    time.sleep(0.1)  # API 호출 간격 제한
+                    
                     marker_info = {
                         'markerId': item['markerId'],
                         'latitude': item['latitude'],
@@ -97,7 +136,7 @@ def fetch_marker_info(cortars_info, divisionName, cortarName):
     else:
         print(f"Failed to fetch marker IDs for cortarNo: {cortarNo}. Status code: {response.status_code}")
         return None
-
+    
 if __name__ == "__main__":
     with open('cortars_info.json', 'r', encoding='utf-8') as file:
         cortars_data = json.load(file)
@@ -108,13 +147,11 @@ if __name__ == "__main__":
     all_marker_info = {}
 
     for cortars_info in cortars_data:
-        divisionName = cortars_info.get('divisionName', 'Unknown')
-        cortarName = cortars_info.get('cortarName', 'Unknown')
-        cortar_name = f"{divisionName} {cortarName}"
+        cortar_name = f"{cortars_info.get('divisionName')} {cortars_info.get('cortarName')}"
         cortar_no = cortars_info.get('cortarNo')
         
         if cortar_no:
-            marker_info_list = fetch_marker_info(cortars_info, divisionName, cortarName)
+            marker_info_list = fetch_marker_info(cortars_info)
             if marker_info_list:
                 all_marker_info[cortar_name] = marker_info_list
                 print(f"Marker information for cortarNo {cortar_no} ({cortar_name}):")
