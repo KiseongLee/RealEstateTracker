@@ -4,6 +4,7 @@
 *.pyc
 *.json
 config.py
+secrets.toml
 
 ### macOS ###
 # General
