@@ -55,3 +55,5 @@
 
 -   데이터는 네이버 부동산 API를 통해 수집됩니다.
 -   외부 스크립트 실행을 위해 `python3` 명령어가 시스템 PATH에 설정되어 있어야 할 수 있습니다.
+-   config_sample.py -> config.py로 명을 변경하고 header와 cookie를 작성해야합니다. (참고 : https://iamgus.tistory.com/746 )
+-   네이버 역지오코딩 API 설정을 위한 키값을 받아와야 합니다. (참고 : https://api.ncloud-docs.com/docs/application-maps-reversegeocoding)
