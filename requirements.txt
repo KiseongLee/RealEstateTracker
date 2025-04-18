@@ -5,5 +5,3 @@ streamlit-folium
 streamlit-aggrid
 numpy
 xlsxwriter
-# requests # 만약 외부 스크립트에서 사용한다면 여기에 추가
-# 다른 필요한 라이브러리들도 추가
