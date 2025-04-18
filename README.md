@@ -29,12 +29,12 @@
 
 3.  **필요 라이브러리 설치:**
     ```
-    pip install -r requirements.txt
+    pip install -r requirements.txt --user
     ```
 
 4.  **Streamlit 앱 실행:**
     ```
-    streamlit run app.py
+    streamlit run app.py or python -m streamlit run app.py
     ```
 
 ## 프로젝트 구조

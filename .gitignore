@@ -4,7 +4,7 @@
 *.pyc
 *.json
 config.py
-secrets.toml
+/.streamlit/secrets.toml
 
 ### macOS ###
 # General
