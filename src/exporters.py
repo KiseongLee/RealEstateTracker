@@ -21,7 +21,10 @@ def to_excel(df_detail, summary_df, area_name, current_date, exclude_low_floors)
     for col in format_cols:
         if col in summary_formatted.columns:
             # Int64 타입의 NA를 처리하기 위해 apply 전에 float으로 변환 후 NA 처리
-            summary_formatted[col] = summary_formatted[col].astype(float).apply(format_eok)
+            # pd.to_numeric을 사용하여 안전하게 숫자(float) 타입으로 변환하고, 변환 불가 값(pd.NA 포함)은 np.nan으로 처리
+            numeric_col = pd.to_numeric(summary_formatted[col], errors='coerce')
+            # np.nan으로 변환된 숫자 컬럼에 format_eok 적용 (format_eok은 pd.isna로 np.nan을 처리함)
+            summary_formatted[col] = numeric_col.apply(format_eok)
 
     base_name = f"{area_name}_{current_date}"
     if exclude_low_floors:
@@ -88,10 +91,10 @@ def export_combined_excel(selected_areas_data, current_date):
                 display_name = f"{division} {dong}{'_저층제외' if exclude_low_floors else ''}"
 
                 # 지역명 컬럼 추가 (만약 이미 존재하면 덮어쓰지 않도록)
-                if '지역구분' not in detail_df.columns:
-                    detail_df['지역구분'] = display_name
-                if '지역구분' not in summary_df.columns:
-                    summary_df['지역구분'] = display_name
+                if '조회지역' not in detail_df.columns:
+                    detail_df['조회지역'] = display_name
+                if '조회지역' not in summary_df.columns:
+                    summary_df['조회지역'] = display_name
 
 
                 all_details.append(detail_df)
@@ -115,7 +118,7 @@ def export_combined_excel(selected_areas_data, current_date):
 
                 # 중복 제거 기준 컬럼 정의 (고유 식별 정보 위주)
                 duplicate_check_columns = [
-                    "구", "동", "아파트명", "연식", "총세대수", "공급면적", "평형", "지역구분" # 지역구분도 포함하여 다른 지역 동일 매물은 유지
+                    "구", "동", "아파트명", "연식", "총세대수", "공급면적", "평형"
                 ]
                 subset_cols = [col for col in duplicate_check_columns if col in combined_summary.columns]
                 if subset_cols:
@@ -123,8 +126,8 @@ def export_combined_excel(selected_areas_data, current_date):
 
                 # 갭 기준 오름차순 정렬 (숫자 변환 및 NA 처리)
                 if '갭(매매-전세)(평균)' in combined_summary.columns:
-                    # 정렬 전 Int64 -> float 변환 (NA 유지)
-                    combined_summary['갭_정렬용'] = combined_summary['갭(매매-전세)(평균)'].astype(float)
+                    # pd.to_numeric 사용하여 pd.NA -> np.nan 변환 (오류 방지)
+                    combined_summary['갭_정렬용'] = pd.to_numeric(combined_summary['갭(매매-전세)(평균)'], errors='coerce')
                     combined_summary = combined_summary.sort_values(by='갭_정렬용', ascending=True, na_position='last')
                     combined_summary = combined_summary.drop(columns=['갭_정렬용'])
 
@@ -137,11 +140,14 @@ def export_combined_excel(selected_areas_data, current_date):
                 summary_formatted_combined = combined_summary.copy() # 포맷팅용 복사본
                 for col in format_cols:
                     if col in summary_formatted_combined.columns:
-                        summary_formatted_combined[col] = summary_formatted_combined[col].astype(float).apply(format_eok)
+                        # pd.to_numeric 사용하여 pd.NA -> np.nan 변환 (오류 방지)
+                        numeric_col = pd.to_numeric(summary_formatted_combined[col], errors='coerce')
+                        # format_eok 함수 적용 (np.nan 처리 가능)
+                        summary_formatted_combined[col] = numeric_col.apply(format_eok)
 
 
-                # 컬럼 순서 조정 (지역구분을 맨 앞으로)
-                cols = ['지역구분'] + [col for col in summary_formatted_combined.columns if col != '지역구분']
+                # 컬럼 순서 조정 (조회지역을 맨 앞으로)
+                cols = ['조회지역'] + [col for col in summary_formatted_combined.columns if col != '조회지역']
                 # 시트 이름 길이 제한
                 summary_sheet_name = f"통합 요약_{current_date}"[:31]
                 summary_formatted_combined[cols].to_excel(writer, sheet_name=summary_sheet_name, index=False)
