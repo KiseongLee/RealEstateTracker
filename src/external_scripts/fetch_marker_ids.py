@@ -143,7 +143,7 @@ def fetch_marker_info(cortars_info, loaded_secrets): # secrets 인자 추가
     params = { # API 파라미터 (변경 없음)
         'cortarNo': cortarNo, 'zoom': 15, 'priceType': 'RETAIL', 'markerId': '', 'markerType': '',
         'selectedComplexNo': '', 'selectedComplexBuildingNo': '', 'fakeComplexMarker': '',
-        'realEstateType': 'APT', 'tradeType': 'A1', 'tag': '::::::::', 'rentPriceMin': 0,
+        'realEstateType': 'APT', 'tradeType': '', 'tag': '::::::::', 'rentPriceMin': 0,
         'rentPriceMax': 900000000, 'priceMin': 0, 'priceMax': 900000000, 'areaMin': 0,
         'areaMax': 900000000, 'oldBuildYears': '', 'recentlyBuildYears': '', 'minHouseHoldCount': 300,
         'maxHouseHoldCount': '', 'showArticle': 'false', 'sameAddressGroup': 'false',
@@ -202,6 +202,7 @@ def fetch_marker_info(cortars_info, loaded_secrets): # secrets 인자 추가
         if marker_info_list:
             return marker_info_list
         else:
+            print(marker_info_list)
             print(f"No valid marker data found in the response for cortarNo: {cortarNo}.")
             return None
 

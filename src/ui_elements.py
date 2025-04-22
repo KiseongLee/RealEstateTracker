@@ -91,13 +91,13 @@ def get_aggrid_options(df):
     gb.configure_column("매물 링크", cellRenderer=cell_renderer_link, suppressMenu=True, filter=False)
 
     # '태그'는 렌더러 사용, 너비는 적절히 설정 (wrapText=True 기본값 적용됨)
-    gb.configure_column('태그', cellRenderer=tag_renderer, width=200) # 예: 200으로 줄임 (필요시 조절)
+    gb.configure_column('태그', cellRenderer=tag_renderer) # 예: 200으로 줄임 (필요시 조절)
 
     # '매물명'은 너비 설정 및 줄바꿈 방지
     gb.configure_column('매물명', width=180, wrapText=False) # 예: 180으로 줄임
 
     # '특징'은 너비를 더 줄이고, 줄바꿈 방지, 최대 너비 설정 (선택적)
-    gb.configure_column('특징', width=50, wrapText=False, maxWidth=100) # 예: 기본 150, 최대 250
+    gb.configure_column('특징', width=50, wrapText=False) # 예: 기본 150, 최대 250
 
     # '중개사'는 너비를 크게 줄이고, 줄바꿈 방지
     gb.configure_column('중개사', width=50, wrapText=False, maxWidth=50) # 예: 100으로 설정
@@ -110,8 +110,8 @@ def get_aggrid_options(df):
     gb.configure_column('거래유형', width=70, wrapText=False)
     gb.configure_column('층수', width=70, wrapText=False)
     gb.configure_column('방향', width=60, wrapText=False)
-    gb.configure_column('연식', width=60)
-    gb.configure_column('총세대수', width=80)
+    gb.configure_column('연식', width=45)
+    gb.configure_column('총세대수', witdh=50)
     gb.configure_column('공급면적', width=80)
     gb.configure_column('가격', width=130) # 가격은 비교적 중요하므로 적당히 확보
 
@@ -141,7 +141,7 @@ def display_table_with_aggrid(df):
             height=600,
             theme='streamlit',
             allow_unsafe_jscode=True, # JsCode 사용 허용
-            enable_enterprise_modules=False, # 엔터프라이즈 모듈 비활성화
+            enable_enterprise_modules=True, # 엔터프라이즈 모듈 비활성화
             key=f'aggrid_{hash(df.to_string())}',
             reload_data=True,
             update_mode='MODEL_CHANGED',
