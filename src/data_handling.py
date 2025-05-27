@@ -4,9 +4,13 @@ import json
 import subprocess
 import os
 import sys # sys 모듈 임포트 추가
+# 최종 데이터를 DataFrame으로 반환하기 위해 필요
+import pandas as pd
 
 # 외부 스크립트가 있는 디렉토리 경로 (data_handling.py 기준 상대 경로)
 EXTERNAL_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "external_scripts")
+OUTPUT_DIR = "output" # 출력 디렉토리 정의 (fetch_data 등에서 일관되게 사용)
+
 
 def save_coordinates(coords, output_dir):
     """
@@ -54,16 +58,14 @@ def get_dong_name_from_file(output_dir):
         st.error(f"동 이름 가져오기 오류 ({filepath}): {e}")
         return "Unknown"
 
-def run_external_script(script_name, *args):
+def run_external_script(script_name, *args, auth_token=None, cookies=None):
     """
     지정된 외부 파이썬 스크립트를 실행하고 결과를 확인합니다.
-    현재 Streamlit 앱과 동일한 파이썬 실행 파일을 사용합니다.
+    인증 정보(auth_token, cookies)를 환경 변수로 전달할 수 있습니다.
     """
     script_path = os.path.join(EXTERNAL_SCRIPTS_DIR, script_name)
-    # --- ▼▼▼ python3 대신 sys.executable 사용 ▼▼▼ ---
-    python_executable = sys.executable # 현재 파이썬 인터프리터 경로
+    python_executable = sys.executable
     command = [python_executable, script_path] + list(args)
-    # --- ▲▲▲ 수정 완료 ▲▲▲ ---
 
     print(f"Executing command: {' '.join(command)}")
     try:
@@ -72,6 +74,15 @@ def run_external_script(script_name, *args):
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         print(f"Setting CWD for subprocess to: {project_root}") # CWD 확인 로그 추가
 
+        # --- 환경 변수 설정 로직 추가 ---
+        env = os.environ.copy()
+        if auth_token:
+            env['NAVER_AUTH_TOKEN'] = auth_token
+        if cookies:
+            # 필요한 쿠키를 환경 변수로 전달 (예시)
+            if 'NNB' in cookies: env['NAVER_COOKIE_NNB'] = cookies['NNB']
+            # ... 다른 쿠키 추가 ...
+        
         result = subprocess.run(
             command,
             check=True,       # True: 반환 코드가 0이 아니면 CalledProcessError 발생
@@ -112,93 +123,104 @@ def run_external_script(script_name, *args):
         print(f"Unexpected error running {script_name}: {e}")
         return False
 
-def fetch_data(coords, output_dir):
+#@st.cache_data #(show_spinner="매물 데이터 조회 중...") # 캐싱 데코레이터 추가
+def fetch_data(coords_tuple, output_dir):
     """
-    좌표를 기반으로 외부 스크립트를 순차적으로 실행하여 부동산 데이터를 가져옵니다.
-    성공 시 로드된 데이터를, 실패 시 None을 반환합니다.
-    생성되는 파일들은 output_dir에 저장됩니다.
+    좌표 튜플을 기반으로 외부 스크립트를 실행하여 부동산 데이터를 가져옵니다. (캐싱 적용됨)
+    성공 시 (로드된 DataFrame, 동 이름), 실패 시 (빈 DataFrame, 동 이름 또는 None) 반환.
     """
-    st.session_state['data_loaded'] = False
-    st.session_state['current_data'] = None
-    st.session_state['dong_name'] = None
+    print(f"--- fetch_data 실행 시작 for coords: {coords_tuple} ---") # 캐시 확인용 로그
 
-    latitude = coords.get('lat')
-    longitude = coords.get('lng')
+    # 튜플 유효성 검사 및 위도, 경도 추출
+    if not isinstance(coords_tuple, tuple) or len(coords_tuple) != 2:
+        st.error("fetch_data: 유효하지 않은 좌표 튜플입니다.")
+        return pd.DataFrame(), None # 실패 시 빈 DF와 None 반환
 
-    if latitude is None or longitude is None:
-        st.error("유효하지 않은 좌표입니다.")
-        return None
+    latitude, longitude = coords_tuple
 
-    # 좌표 저장 (출력 디렉토리 사용)
-    save_coordinates(coords, output_dir)
+    # 좌표 저장용 딕셔너리 생성 (save_coordinates는 딕셔너리 필요)
+    coords_dict = {'lat': latitude, 'lng': longitude}
 
-    # 파라미터 파일 생성 (출력 디렉토리 사용)
+    # 좌표 저장 (변경 없음)
+    save_coordinates(coords_dict, output_dir)
+
+    # 파라미터 파일 생성 (변경 없음)
     params = create_params(latitude, longitude)
-    params_file_rel_path = os.path.join(output_dir, 'params.json') # 상대 경로
-    params_file_abs_path = os.path.abspath(params_file_rel_path) # 절대 경로 (로깅용)
+    params_file_rel_path = os.path.join(output_dir, 'params.json')
+    params_file_abs_path = os.path.abspath(params_file_rel_path)
     try:
-        # params.json 생성 시 output 디렉토리 존재 확인 및 생성
         os.makedirs(output_dir, exist_ok=True)
         with open(params_file_abs_path, 'w', encoding='utf-8') as f:
             json.dump(params, f, ensure_ascii=False, indent=4)
         print(f"파라미터 저장 완료: {params_file_abs_path}")
-    except IOError as e:
-        st.error(f"{params_file_abs_path} 저장 실패: {e}")
-        return None
     except Exception as e:
-        st.error(f"파라미터 저장 중 예상치 못한 오류: {e}")
-        return None
+        st.error(f"파라미터 저장 중 오류: {e}")
+        return pd.DataFrame(), None # 실패 시 빈 DF와 None 반환
 
-    # 스크립트 순차 실행
-    # 1. fetch_cortars.py 실행 (params.json 경로를 인자로 전달)
+    # --- (선택) 자동 인증 정보 가져오기 로직 (미구현 상태) ---
+    auth_token_to_pass = None
+    cookies_to_pass = None
+    # ---------------------------------------------------
+    # 스크립트 순차 실행 (run_external_script에 인증 정보 전달)
     print("\n--- fetch_cortars.py 실행 시작 ---")
-    # run_external_script에 전달하는 경로는 CWD(프로젝트 루트) 기준 상대 경로여야 함
-    if not run_external_script('fetch_cortars.py', params_file_rel_path):
-        st.error("fetch_cortars.py 스크립트 실행 중 오류가 발생했습니다.")
-        return None # 오류 발생 시 중단
+    if not run_external_script('fetch_cortars.py', params_file_rel_path, auth_token=auth_token_to_pass, cookies=cookies_to_pass):
+        st.error("fetch_cortars.py 실패.")
+        # 실패해도 동 이름은 시도해볼 수 있음 (파일이 이미 생성되었을 수 있으므로)
+        dong_name_on_fail = get_dong_name_from_file(output_dir)
+        return pd.DataFrame(), dong_name_on_fail
     print("--- fetch_cortars.py 실행 완료 ---")
 
-    # 동 이름 가져오기 시도
-    st.session_state['dong_name'] = get_dong_name_from_file(output_dir)
-    print(f"동 이름 가져오기 결과: {st.session_state['dong_name']}")
+    # 동 이름 파일에서 읽기 (st.session_state 대신 변수에 저장)
+    dong_name = get_dong_name_from_file(output_dir)
+    print(f"동 이름 가져오기(파일): {dong_name}")
 
-    # 2. fetch_marker_ids.py 실행 (별도 인자 없음)
     print("\n--- fetch_marker_ids.py 실행 시작 ---")
-    if not run_external_script('fetch_marker_ids.py'):
-        st.error("fetch_marker_ids.py 스크립트 실행 중 오류가 발생했습니다.")
-        return None # 오류 발생 시 중단
+    if not run_external_script('fetch_marker_ids.py', auth_token=auth_token_to_pass, cookies=cookies_to_pass):
+        st.error("fetch_marker_ids.py 실패.")
+        return pd.DataFrame(), dong_name # 실패 시 빈 DF와 현재까지 얻은 동 이름 반환
     print("--- fetch_marker_ids.py 실행 완료 ---")
 
-    # 3. collect_complex_details.py 실행 (별도 인자 없음)
     print("\n--- collect_complex_details.py 실행 시작 ---")
-    if not run_external_script('collect_complex_details.py'):
-        st.error("collect_complex_details.py 스크립트 실행 중 오류가 발생했습니다.")
-        return None # 오류 발생 시 중단
+    if not run_external_script('collect_complex_details.py', auth_token=auth_token_to_pass, cookies=cookies_to_pass):
+        st.error("collect_complex_details.py 실패.")
+        return pd.DataFrame(), dong_name # 실패 시 빈 DF와 현재까지 얻은 동 이름 반환
     print("--- collect_complex_details.py 실행 완료 ---")
 
-    # 최종 데이터 로드 (출력 디렉토리 사용)
+    # 최종 데이터 로드 및 DataFrame 변환
     final_data_file_rel_path = os.path.join(output_dir, 'complex_details_by_district.json')
     final_data_file_abs_path = os.path.abspath(final_data_file_rel_path)
     print(f"\n최종 데이터 로드 시도: {final_data_file_abs_path}")
     try:
         with open(final_data_file_abs_path, 'r', encoding='utf-8') as file:
-            loaded_data = json.load(file)
-        st.session_state['current_data'] = loaded_data
-        st.session_state['data_loaded'] = True
-        st.success("데이터 로딩 완료!")
-        print("데이터 로딩 성공")
-        return loaded_data # 성공 시 데이터 반환
+            raw_data = json.load(file)
+
+        # --- ▼▼▼ 수정 4: JSON을 DataFrame으로 변환하는 로직 추가 ▼▼▼ ---
+        # JSON 구조가 {'지역명': [{}, {}, ...]} 형태라고 가정
+        # dong_name을 키로 사용하거나, 첫 번째 키 사용 (상황에 맞게 조정 필요)
+        area_key_to_load = dong_name if dong_name != "Unknown" and dong_name in raw_data else None
+        if not area_key_to_load and raw_data:
+            area_key_to_load = list(raw_data.keys())[0] # 첫 번째 키 사용 (임시 방편)
+
+        if area_key_to_load and raw_data.get(area_key_to_load):
+            loaded_df = pd.DataFrame(raw_data[area_key_to_load])
+            print("데이터 로딩 및 DataFrame 변환 성공")
+            # st.success는 app.py에서 호출하도록 제거
+            # st.success("데이터 로딩 완료!")
+            return loaded_df, dong_name # 성공 시 DataFrame과 동 이름 반환
+        else:
+            print("로드된 JSON 데이터가 비어있거나 해당 지역 키가 없습니다.")
+            st.warning(f"'{dong_name}' 지역의 상세 데이터가 없습니다.") # UI 메시지 app.py에서 처리
+            return pd.DataFrame(), dong_name # 데이터 없으면 빈 DF와 동 이름 반환
+
     except FileNotFoundError:
-        st.error(f"{final_data_file_abs_path} 파일을 찾을 수 없습니다. 데이터 수집 과정에 문제가 있었을 수 있습니다.")
+        st.error(f"최종 데이터 파일({final_data_file_abs_path}) 없음.")
         print(f"오류: 최종 데이터 파일({final_data_file_abs_path}) 없음")
     except json.JSONDecodeError:
-        st.error(f"{final_data_file_abs_path} 파일 파싱 오류.")
+        st.error(f"최종 데이터 파일({final_data_file_abs_path}) JSON 파싱 오류.")
         print(f"오류: 최종 데이터 파일({final_data_file_abs_path}) JSON 파싱 실패")
     except Exception as e:
-        st.error(f"최종 데이터 로드 오류 ({final_data_file_abs_path}): {e}")
+        st.error(f"최종 데이터 로드 중 오류: {e}")
         print(f"오류: 최종 데이터 로드 중 예상치 못한 오류: {e}")
 
-    # 실패 시
-    st.session_state['data_loaded'] = False
-    st.session_state['current_data'] = None
-    return None
+    # 로드 실패 시 빈 데이터프레임과 현재까지 얻은 동 이름 반환
+    return pd.DataFrame(), dong_name
