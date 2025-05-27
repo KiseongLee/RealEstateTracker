@@ -5,6 +5,16 @@ import numpy as np
 # src 패키지 내 utils 모듈에서 필요한 함수 임포트
 from .utils import convert_price_to_number, extract_numeric_area, extract_floor
 
+
+def extract_year_from_string(value):
+    """ "YYYYMM" 형식 문자열에서 연도(YYYY)만 추출 (NA 처리 포함, 문자열 입력 가정) """
+    if pd.isna(value) or not isinstance(value, str) or len(value) != 6 or not value.isdigit():
+        return pd.NA # 유효하지 않은 형식이면 NA 반환
+    try:
+        return int(value[:4]) # 앞 4자리 숫자를 정수로 변환
+    except ValueError:
+        return pd.NA # 변환 실패 시 NA 반환
+
 def create_summary(df_detail):
     """
     상세 데이터프레임(df_detail)에서 아파트 단지 및 평형별 요약 데이터를 생성합니다.
