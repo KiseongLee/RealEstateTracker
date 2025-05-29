@@ -33,7 +33,8 @@ session_keys_with_defaults = {
     'selected_areas': {},          # 지역 그룹 저장용 딕셔너리 (빈 딕셔너리로 초기화)
     'last_click_time': 0,          # 디바운스용 타임스탬프 추가
     'fetch_start_time': None,      # 조회 시작 시간 추가
-    'error_message': None          # 에러 메시지 저장용 추가
+    'error_message': None,         # 에러 메시지 저장용 추가
+    'group_add_status': None       # 팝업 메시지 정보 저장용 (dict 또는 None)
 }
 
 for key, default_value in session_keys_with_defaults.items():
@@ -92,7 +93,42 @@ overlay_html_with_text = """
     <div class="loading-text">⏳ 데이터를 가져오는 중입니다...</div>
 </div>
 """
+# ==============================================================================
+# 팝업 다이얼로그 함수 정의
+# ==============================================================================
+@st.dialog("알림")
+def display_group_add_status_dialog():
+    status = st.session_state.get('group_add_status')
+    if not status:
+        st.warning("표시할 메시지가 없습니다.")
+        # "닫기" 버튼을 위한 컬럼 (필요하다면 동일하게 적용)
+        _, col_btn_close, _ = st.columns([1, 0.5, 1]) # 비율은 버튼 텍스트 길이에 맞춰 조정
+        with col_btn_close:
+            if st.button("닫기", key="dialog_close_button_ucw", use_container_width=True):
+                st.session_state.group_add_status = None
+                st.rerun()
+        return
 
+    message = status.get("message", "알 수 없는 정보입니다.")
+    msg_type = status.get("type", "info")
+
+    if msg_type == "success":
+        st.success(message)
+    elif msg_type == "warning":
+        st.warning(message)
+    else:
+        st.info(message)
+
+    # "확인" 버튼을 가운데 정렬하기 위한 columns
+    # 중앙 컬럼의 비율을 버튼 텍스트에 맞춰 최소화
+    # 예: '확인' 두 글자이므로 매우 작은 비율로 설정
+    # 양쪽 스페이서 컬럼은 동일한 비율로 설정하여 중앙 정렬 효과
+    col_spacer1, col_button, col_spacer2 = st.columns([1, 0.5, 1]) # 중앙 비율을 더 작게 (예: 0.2 또는 0.15)
+
+    with col_button:
+        if st.button("확인", key="dialog_confirm_button_ucw", use_container_width=True):
+            st.session_state.group_add_status = None
+            st.rerun()
 # ==============================================================================
 # 콜백 함수 (디바운스 메커니즘 추가)
 # ==============================================================================
@@ -155,14 +191,14 @@ if st.session_state.is_fetching:
     # 이 아래의 UI 요소들은 그려지더라도 오버레이에 가려지게 됩니다.
     
 # --- 2. 지도 및 선택 지역 목록 레이아웃 ---
-left_column, center_column, right_column = st.columns([1, 2, 1])
+left_column, right_column = st.columns([3, 1])
 
-with center_column:
+with left_column:
     st.markdown("### 🗺️ 지도에서 위치 클릭")
     folium_map = create_folium_map()
     map_interaction_return_value = st_folium(
         folium_map,
-        width=950, height=500,
+        width=1300, height=600,
         key='folium_map_interaction',          # 콜백에서 상태 접근 위해 유지
         returned_objects=['last_clicked'],     # 반환값 유지 (디버깅 등)
         on_change=handle_map_click             # 콜백 함수 연결
@@ -371,7 +407,7 @@ if not st.session_state.is_fetching:
         with cols_header[0]:
             element_cols = st.columns([3.05, 2.5, 2.5, 1.95])
             with element_cols[0]:
-                st.write(f"##### {current_dong_name} 매물 목록 ({len(df_display)}개)")
+                st.write(f"##### {current_dong_name} 근처 매물 목록 ({len(df_display)}개)")
             with element_cols[1]: # 복수 정렬 기준
                 sort_options = ['가격', '매물명', '연식', '공급면적', '총세대수']
                 available_sort_options = [opt for opt in sort_options if opt in df_display.columns or opt == '가격']
@@ -430,18 +466,32 @@ if not st.session_state.is_fetching:
                 unique_key = (division, dong, exclude_low_floors)
                 add_button_label = f"그룹 추가"
                 if st.button(add_button_label, key=f'add_area_{current_dong_name}'):
-                    if unique_key not in st.session_state.selected_areas:
+                    MAX_GROUPS = 5  # 그룹 최대 개수를 5개로 설정
+                    current_selected_areas_count = len(st.session_state.selected_areas)
+                    message_to_show = ""
+                    message_type = ""
+                    if unique_key in st.session_state.selected_areas:
+                        message_to_show = f"'{division} {dong}{' (저층 제외)' if exclude_low_floors else ''}' 그룹은 이미 존재합니다."
+                        message_type = "warning"
+                    elif current_selected_areas_count >= MAX_GROUPS:
+                        message_to_show = f"더 이상 그룹을 추가할 수 없습니다. 최대 {MAX_GROUPS}개의 그룹만 만들 수 있습니다. (현재 {current_selected_areas_count}개)"
+                        message_type = "warning"
+                    else:
+                        # 그룹 추가 로직
                         summary_for_group = create_summary(df_final_display)
-                        # 요약이 비었거나, 상세 데이터가 비었을 경우 그룹 추가 여부 결정 필요
-                        # 현재 로직: 요약이 비었거나 상세가 없어도 추가는 함 (추후 조정 가능)
                         st.session_state.selected_areas[unique_key] = {
                                 'detail': df_final_display.copy(),
-                                'summary': summary_for_group.copy()
+                                'summary': summary_for_group.copy() if summary_for_group is not None else pd.DataFrame()
                             }
-                        st.success(f"'{division} {dong}{' (저층 제외)' if exclude_low_floors else ''}' 그룹이 추가되었습니다.")
-                        st.rerun() # 그룹 목록 업데이트 위해 rerun
-                    else:
-                        st.warning(f"'{division} {dong}{' (저층 제외)' if exclude_low_floors else ''}' 그룹은 이미 존재합니다.")
+                        new_selected_areas_count = len(st.session_state.selected_areas) # 추가 후 개수 다시 확인
+                        message_to_show = f"'{division} {dong}{' (저층 제외)' if exclude_low_floors else ''}' 그룹이 추가되었습니다. (현재 {new_selected_areas_count}/{MAX_GROUPS}개)"
+                        message_type = "success"    
+
+                    # 팝업에 표시할 메시지 및 타입 설정
+                    st.session_state.group_add_status = {"message": message_to_show, "type": message_type}
+                    # 팝업 다이얼로그 호출
+                    display_group_add_status_dialog()
+
         # --- AgGrid 테이블 표시 (기존 코드와 거의 동일) ---
         if not df_final_display.empty:
             # display_table_with_aggrid 함수에 키 전달하여 재랜더링 문제 방지 고려
