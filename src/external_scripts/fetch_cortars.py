@@ -5,41 +5,48 @@ import pprint
 import sys
 import os # os 모듈 임포트
 
-# --- ▼▼▼ config 임포트 수정 ▼▼▼ ---
-# fetch_cortars.py는 src/external_scripts/ 안에 있고, config.py는 src/ 안에 있음.
-# 따라서 config.py는 현재 파일 기준으로 부모 패키지(src)에 위치함.
-# 상대 경로 '..'를 사용하여 부모 패키지에서 config 모듈을 가져옴.
-try:
-    # 기본 실행 경로 (data_handling.py에서 실행될 때)
-    from ..config import cookies, headers
-except ImportError:
-    # 스크립트를 직접 실행하는 경우 등 예외 상황 처리 (덜 권장됨)
-    # ImportError 발생 시, 프로젝트 루트를 sys.path에 추가하여 src.config를 찾도록 시도
-    print("Warning: Relative import failed. Attempting to import via sys.path manipulation.", file=sys.stderr)
-    # 현재 파일의 절대 경로를 기준으로 프로젝트 루트 경로 계산
-    current_dir = os.path.dirname(os.path.abspath(__file__)) # /path/to/your_project_directory/src/external_scripts
-    src_dir = os.path.dirname(current_dir) # /path/to/your_project_directory/src
-    project_root = os.path.dirname(src_dir) # /path/to/your_project_directory
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root) # sys.path 맨 앞에 프로젝트 루트 추가
+# header와 cookie 정보는 환경 변수로부터 가져옵니다.
+def get_config_from_env():
+    """
+    환경 변수에서 Header와 Cookie 정보를 가져와 파싱합니다.
+    실패 시 기본값으로 빈 딕셔너리를 반환합니다.
+    """
+    headers_json_str = os.environ.get('NAVER_API_ALL_HEADERS_JSON')
+    cookies_json_str = os.environ.get('NAVER_API_COOKIES_JSON')
 
-    try:
-        from src.config import cookies, headers
-        print("Successfully imported config via sys.path.")
-    except ImportError:
-        print("\nCritical Error: Could not import 'cookies' and 'headers' from config.", file=sys.stderr)
-        print("1. Ensure 'config.py' exists in the 'src/' directory.", file=sys.stderr)
-        print("2. Ensure 'src/' directory has an '__init__.py' file.", file=sys.stderr)
-        print("3. Check for syntax errors in 'config.py'.", file=sys.stderr)
-        sys.exit(1) # config 임포트 최종 실패 시 스크립트 종료
-# --- ▲▲▲ config 임포트 수정 완료 ▲▲▲ ---
+    parsed_headers = {}
+    if headers_json_str:
+        try:
+            parsed_headers = json.loads(headers_json_str)
+            if not isinstance(parsed_headers, dict):
+                print("Warning: NAVER_API_ALL_HEADERS_JSON is not a valid JSON dictionary. Using empty headers.", file=sys.stderr)
+                parsed_headers = {}
+        except json.JSONDecodeError as e:
+            print(f"Warning: Failed to parse NAVER_API_ALL_HEADERS_JSON: {e}. Using empty headers.", file=sys.stderr)
+            parsed_headers = {}
+    else:
+        print("Warning: NAVER_API_ALL_HEADERS_JSON environment variable not found. Using empty headers.", file=sys.stderr)
 
+    parsed_cookies = {}
+    if cookies_json_str:
+        try:
+            parsed_cookies = json.loads(cookies_json_str)
+            if not isinstance(parsed_cookies, dict):
+                print("Warning: NAVER_API_COOKIES_JSON is not a valid JSON dictionary. Using empty cookies.", file=sys.stderr)
+                parsed_cookies = {}
+        except json.JSONDecodeError as e:
+            print(f"Warning: Failed to parse NAVER_API_COOKIES_JSON: {e}. Using empty cookies.", file=sys.stderr)
+            parsed_cookies = {}
+    else:
+        print("Warning: NAVER_API_COOKIES_JSON environment variable not found. Using empty cookies.", file=sys.stderr)
+        
+    return parsed_headers, parsed_cookies
 
-def fetch_cortars(params):
+def fetch_cortars(params, headers_env, cookies_env): # 인자로 headers와 cookies를 받도록 수정
     """지정된 파라미터로 Naver Land API에서 Cortar 정보를 가져옵니다."""
     try:
-        # config에서 가져온 cookies, headers 사용
-        response = requests.get('https://new.land.naver.com/api/cortars', params=params, cookies=cookies, headers=headers, timeout=10)
+        # 함수 호출 시 전달받은 headers_env, cookies_env 사용
+        response = requests.get('https://new.land.naver.com/api/cortars', params=params, cookies=cookies_env, headers=headers_env, timeout=10)
         response.raise_for_status() # HTTP 오류 발생 시 예외 발생
 
         response_data = response.json()
@@ -64,28 +71,44 @@ def fetch_cortars(params):
             return cortars_info
         else:
             print("Error: Response JSON does not contain 'cortarVertexLists'.", file=sys.stderr)
-            print("Response received:", response_data, file=sys.stderr)
+            # 응답 내용이 너무 길 수 있으므로, 필요한 부분만 출력하거나 파일로 저장하는 것이 좋습니다.
+            # 여기서는 처음 500자만 출력하도록 제한합니다.
+            response_text_preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
+            print(f"Response text preview: {response_text_preview}", file=sys.stderr)
+            # print("Full response received:", response_data, file=sys.stderr) # 매우 길 수 있음
             return None
 
     except requests.exceptions.RequestException as e:
         print(f"Error during requests to {e.request.url}: {e}", file=sys.stderr)
         return None
     except json.JSONDecodeError:
-        print(f"Error: Failed to parse JSON response. Response text: {response.text}", file=sys.stderr)
+        response_text_preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
+        print(f"Error: Failed to parse JSON response. Response text preview: {response_text_preview}", file=sys.stderr)
         return None
     except Exception as e:
         print(f"An unexpected error occurred in fetch_cortars: {e}", file=sys.stderr)
         return None
 
 if __name__ == "__main__":
-    project_root_cwd = os.getcwd()
+    project_root_cwd = os.getcwd() # 현재 작업 디렉토리 가져오기
     print(f"Executing fetch_cortars.py from CWD: {project_root_cwd}")
 
-    output_dir = 'output'
+    output_dir = 'output' # 출력 디렉토리, 필요시 CWD 기준으로 상대 경로 사용 가능
+
+    # 스크립트 직접 실행 시에도 환경 변수에서 config 가져오기
+    headers_from_env, cookies_from_env = get_config_from_env()
+
+    if not headers_from_env or not cookies_from_env:
+        print("Warning: Headers or Cookies could not be loaded from environment variables for standalone execution.", file=sys.stderr)
+        print("API requests might fail or be incomplete.", file=sys.stderr)
+        # 여기서 스크립트를 종료할 수도 있지만, 일단 진행하도록 둡니다.
+        # sys.exit(1)
 
     if len(sys.argv) > 1:
         params_file_rel_path = sys.argv[1]
-        params_file_abs_path = os.path.abspath(params_file_rel_path)
+        # params_file_abs_path는 CWD 기준으로 절대 경로를 만듭니다.
+        # data_handling.py에서 cwd를 프로젝트 루트로 설정하므로, 여기서도 동일한 가정을 합니다.
+        params_file_abs_path = os.path.abspath(params_file_rel_path) 
 
         print(f"Attempting to read params from: {params_file_abs_path}")
 
@@ -95,7 +118,7 @@ if __name__ == "__main__":
 
         try:
             with open(params_file_abs_path, 'r', encoding='utf-8') as f:
-                params = json.load(f)
+                params_main = json.load(f) # 변수명 변경 (params -> params_main)
         except json.JSONDecodeError:
             print(f"Error: Failed to parse JSON from parameter file '{params_file_abs_path}'", file=sys.stderr)
             sys.exit(1)
@@ -106,35 +129,47 @@ if __name__ == "__main__":
             print(f"An unexpected error occurred while reading params file: {e}", file=sys.stderr)
             sys.exit(1)
 
-        cortars_info = fetch_cortars(params)
+        # fetch_cortars 함수에 환경변수에서 가져온 headers와 cookies 전달
+        cortars_info_main = fetch_cortars(params_main, headers_from_env, cookies_from_env) # 변수명 변경
 
-        if cortars_info:
+        if cortars_info_main:
+            # 출력 파일 경로도 CWD 기준으로 output 디렉토리 안에 저장
             output_filename = 'cortars_info.json'
-            output_filepath = os.path.join(output_dir, output_filename)
-            output_abs_filepath = os.path.abspath(output_filepath)
+            # output_dir이 상대 경로인 경우, CWD를 기준으로 경로가 결정됩니다.
+            # data_handling.py와 일관성을 위해 os.path.join을 사용합니다.
+            output_filepath = os.path.join(output_dir, output_filename) 
+            # 절대 경로는 로그용으로만 사용
+            output_abs_filepath_log = os.path.abspath(output_filepath)
 
-            print(f"Attempting to write cortars info to: {output_abs_filepath}")
+            print(f"Attempting to write cortars info to: {output_abs_filepath_log} (relative path used: {output_filepath})")
 
-            division_name = cortars_info.get('divisionName', 'Unknown_Division')
-            cortar_name = cortars_info.get('cortarName', 'Unknown_Cortar')
+            division_name = cortars_info_main.get('divisionName', 'Unknown_Division')
+            cortar_name = cortars_info_main.get('cortarName', 'Unknown_Cortar')
             display_name = f"{division_name} {cortar_name}".strip()
 
             try:
-                with open(output_abs_filepath, 'w', encoding='utf-8') as file:
-                    json.dump(cortars_info, file, ensure_ascii=False, indent=4)
-                print(f"Cortars info for '{display_name}' collected and saved to '{output_abs_filepath}'")
+                # output 디렉토리가 CWD 내에 없다면 생성
+                # data_handling.py에서 cwd를 프로젝트 루트로 설정하고 output 디렉토리를 생성할 것이므로
+                # 이 스크립트가 직접 output 디렉토리를 생성해야 할 수도 있습니다.
+                # 하지만 보통 data_handling.py에 의해 이미 생성되어 있을 것입니다.
+                # 안전을 위해 여기서도 확인 및 생성 로직을 추가할 수 있습니다.
+                os.makedirs(output_dir, exist_ok=True) # output 디렉토리 생성 (이미 있어도 에러 안남)
+
+                with open(output_filepath, 'w', encoding='utf-8') as file: # 상대 경로 사용
+                    json.dump(cortars_info_main, file, ensure_ascii=False, indent=4)
+                print(f"Cortars info for '{display_name}' collected and saved to '{output_abs_filepath_log}'")
             except IOError as e:
-                print(f"Error writing cortars info to file '{output_abs_filepath}': {e}", file=sys.stderr)
+                print(f"Error writing cortars info to file '{output_abs_filepath_log}': {e}", file=sys.stderr)
                 sys.exit(1)
             except Exception as e:
                 print(f"An unexpected error occurred while writing cortars info: {e}", file=sys.stderr)
                 sys.exit(1)
         else:
             print("No cortars data collected or an error occurred during fetching.", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(1) # fetch 실패 시 종료
     else:
         print("Error: No parameter file path provided as command-line argument.", file=sys.stderr)
         print("Usage: python fetch_cortars.py <path_to_params.json>", file=sys.stderr)
         sys.exit(1)
 
-    sys.exit(0)
+    sys.exit(0) # 성공 시 종료 코드 0
