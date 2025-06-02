@@ -5,3 +5,4 @@ streamlit-folium
 streamlit-aggrid
 numpy
 xlsxwriter
+streamlit_local_storage

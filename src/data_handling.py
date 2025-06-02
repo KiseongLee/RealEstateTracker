@@ -14,17 +14,20 @@ OUTPUT_DIR = "output" # 출력 디렉토리 정의 (fetch_data 등에서 일관�
 
 def save_coordinates(coords, output_dir):
     """
-    클릭된 좌표를 지정된 출력 디렉토리의 JSON 파일에 저장합니다.
+    클릭된 좌표를 지정된 출력 디렉토리의 JSON 파일에 저장합니다. (현재 사용 안 함 가정)
+    오류 발생 시 Streamlit UI에 직접 에러를 표시하지 않고, 콘솔에만 로그를 남깁니다.
     """
     filepath = os.path.join(output_dir, 'clicked_coords.json')
     try:
+        os.makedirs(output_dir, exist_ok=True) # output_dir이 없을 경우 생성
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(coords, f, ensure_ascii=False, indent=4)
-        print(f"좌표 저장 완료: {filepath}")
+        print(f"좌표 저장 완료: {filepath}", file=sys.stderr) # 로그는 stderr로
     except IOError as e:
-        st.error(f"좌표 저장 실패 ({filepath}): {e}")
+        print(f"오류: 좌표 저장 실패 ({filepath}): {e}", file=sys.stderr)
     except Exception as e:
-        st.error(f"좌표 저장 중 예상치 못한 오류: {e}")
+        print(f"오류: 좌표 저장 중 예상치 못한 오류: {e}", file=sys.stderr)
+
 
 def create_params(lat, lon):
     """
@@ -35,6 +38,7 @@ def create_params(lat, lon):
 def get_dong_name_from_file(output_dir):
     """
     지정된 출력 디렉토리의 cortars_info.json 파일에서 동 이름을 읽어옵니다.
+    오류 발생 시 Streamlit UI에 직접 에러를 표시하지 않고, 콘솔에만 로그를 남깁니다.
     """
     filepath = os.path.join(output_dir, 'cortars_info.json')
     try:
@@ -42,185 +46,191 @@ def get_dong_name_from_file(output_dir):
             cortars_info = json.load(file)
             division = cortars_info.get('divisionName', '')
             cortar = cortars_info.get('cortarName', '')
-            # 구 또는 동 이름이 비어있지 않은 경우에만 조합, 아니면 "Unknown"
             if division and cortar:
                 return f"{division} {cortar}".strip()
             else:
-                print(f"경고: {filepath} 파일에서 divisionName 또는 cortarName을 찾을 수 없습니다.")
+                print(f"경고: {filepath} 파일에서 divisionName 또는 cortarName을 찾을 수 없습니다.", file=sys.stderr)
                 return "Unknown"
     except FileNotFoundError:
-        print(f"경고: {filepath} 파일을 찾을 수 없습니다.")
+        print(f"경고: {filepath} 파일을 찾을 수 없습니다.", file=sys.stderr)
         return "Unknown"
     except json.JSONDecodeError:
-        st.error(f"{filepath} 파일 파싱 오류.")
+        print(f"오류: {filepath} 파일 파싱 오류.", file=sys.stderr)
         return "Unknown"
     except Exception as e:
-        st.error(f"동 이름 가져오기 오류 ({filepath}): {e}")
+        print(f"오류: 동 이름 가져오기 오류 ({filepath}): {e}", file=sys.stderr)
         return "Unknown"
 
-def run_external_script(script_name, *args, auth_token=None, cookies=None):
+def run_external_script(script_name, *args, 
+                        headers_to_pass=None, cookies_to_pass=None, 
+                        client_id_to_pass=None, client_secret_to_pass=None):
     """
-    지정된 외부 파이썬 스크립트를 실행하고 결과를 확인합니다.
-    인증 정보(auth_token, cookies)를 환경 변수로 전달할 수 있습니다.
+    외부 파이썬 스크립트를 실행하고 결과를 확인합니다.
+    API 키 오류 발생 시 특별한 문자열 "API_KEY_ERROR_FROM_SCRIPT_EXIT_CODE_99"을 반환합니다.
+    일반 실패 시 False, 성공 시 True를 반환합니다.
     """
     script_path = os.path.join(EXTERNAL_SCRIPTS_DIR, script_name)
-    python_executable = sys.executable
+    python_executable = sys.executable # 현재 Streamlit 앱을 실행하는 Python 인터프리터
     command = [python_executable, script_path] + list(args)
 
-    print(f"Executing command: {' '.join(command)}")
+    print(f"Executing command: {' '.join(command)}", file=sys.stderr)
     try:
-        # cwd 설정: 외부 스크립트가 파일 입출력을 할 때 기준 디렉토리를 프로젝트 루트로 설정
-        # data_handling.py -> src -> your_project_directory
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        print(f"Setting CWD for subprocess to: {project_root}") # CWD 확인 로그 추가
-
-        # --- 환경 변수 설정 로직 추가 ---
+        # 외부 스크립트의 작업 디렉토리를 프로젝트 루트로 설정
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # src 폴더의 부모
+        
+        # 환경 변수 설정
         env = os.environ.copy()
-        if auth_token:
-            env['NAVER_AUTH_TOKEN'] = auth_token
-        if cookies:
-            # 필요한 쿠키를 환경 변수로 전달 (예시)
-            if 'NNB' in cookies: env['NAVER_COOKIE_NNB'] = cookies['NNB']
-            # ... 다른 쿠키 추가 ...
+        if headers_to_pass and isinstance(headers_to_pass, dict):
+            env['NAVER_API_ALL_HEADERS_JSON'] = json.dumps(headers_to_pass)
+        if cookies_to_pass and isinstance(cookies_to_pass, dict):
+            env['NAVER_API_COOKIES_JSON'] = json.dumps(cookies_to_pass)
+        if client_id_to_pass:
+            env['NAVER_CLIENT_ID'] = client_id_to_pass
+        if client_secret_to_pass:
+            env['NAVER_CLIENT_SECRET'] = client_secret_to_pass
         
         result = subprocess.run(
             command,
-            check=True,       # True: 반환 코드가 0이 아니면 CalledProcessError 발생
-            capture_output=True,# True: stdout, stderr 캡처
-            text=True,        # True: stdout, stderr를 문자열로 디코딩
-            encoding='utf-8', # 디코딩 인코딩 지정
-            cwd=project_root  # 실행 디렉토리 설정
-            )
-        # 성공 시 로그 (stdout이 너무 길면 문제가 될 수 있으니 주의)
-        print(f"스크립트 {script_name} 실행 성공:")
-        if result.stdout:
-            print(f"STDOUT:\n{result.stdout[:1000]}...") # 너무 길면 일부만 출력
-        if result.stderr:
-            print(f"STDERR:\n{result.stderr[:1000]}...") # 에러 스트림도 출력 (경고 등 포함 가능)
+            check=False,        # False로 설정하여 반환 코드를 직접 확인
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            cwd=project_root,   # 작업 디렉토리 설정
+            env=env             # 수정된 환경 변수 전달
+        )
+        
+        # 종료 코드 확인
+        if result.returncode == 99: # API 키 에러 특정 종료 코드 (fetch_marker_ids.py에서 설정)
+            print(f"Script {script_name} indicated API Key (401) error via exit code 99.", file=sys.stderr)
+            if result.stderr: # 에러 스트림이 있다면 출력 (디버깅용)
+                print(f"STDERR from API Key errored script ({script_name}):\n{result.stderr[:1000]}...", file=sys.stderr)
+            return "API_KEY_ERROR_FROM_SCRIPT_EXIT_CODE_99" # 특별한 문자열 반환
+
+        elif result.returncode != 0: # 99가 아닌 다른 오류 종료 코드
+            print(f"Script {script_name} failed with exit code {result.returncode}.", file=sys.stderr)
+            if result.stdout: print(f"STDOUT ({script_name}):\n{result.stdout[:1000]}...", file=sys.stderr)
+            if result.stderr: print(f"STDERR ({script_name}):\n{result.stderr[:1000]}...", file=sys.stderr)
+            return False # 일반적인 실패
+
+        # 성공 시 (returncode == 0)
+        print(f"Script {script_name} executed successfully.", file=sys.stderr)
+        if result.stdout: print(f"STDOUT ({script_name}):\n{result.stdout[:500]}...", file=sys.stderr)
+        if result.stderr: print(f"STDERR (Info/Warnings from {script_name}):\n{result.stderr[:500]}...", file=sys.stderr)
         return True
 
     except FileNotFoundError:
-        # sys.executable 경로가 잘못되었거나, 스크립트 파일 자체가 없을 때 발생 가능
-        st.error(f"스크립트 실행 오류: 실행 파일 '{python_executable}' 또는 스크립트 '{script_path}'를 찾을 수 없습니다. PATH 및 파일 위치를 확인하세요.")
-        print(f"FileNotFoundError: Command '{' '.join(command)}' failed.")
-        return False
-    except subprocess.CalledProcessError as e:
-        # 외부 스크립트가 오류를 내며 종료(non-zero exit code)했을 때 발생
-        st.error(f"스크립트 {script_name} 실행 실패 (종료 코드: {e.returncode}):")
-        # 오류 발생 시 stdout, stderr 무조건 출력하여 원인 파악
-        print(f"CalledProcessError for {script_name}:")
-        print(f"STDOUT:\n{e.stdout}")
-        print(f"STDERR:\n{e.stderr}")
-        # Streamlit UI에도 에러 표시
-        if e.stderr:
-            st.error(f"스크립트 오류 메시지:\n{e.stderr}")
-        elif e.stdout:
-            st.warning(f"스크립트 출력 메시지:\n{e.stdout}") # 오류는 없지만 출력이 있을 경우
-        return False
-    except Exception as e:
-        # 그 외 예상치 못한 오류 (예: 권한 문제)
-        st.error(f"스크립트 {script_name} 실행 중 예상치 못한 오류: {e}")
-        print(f"Unexpected error running {script_name}: {e}")
-        return False
+        print(f"FileNotFoundError: Command '{' '.join(command)}' failed. Check script path and python executable.", file=sys.stderr)
+        return False # 일반적인 실패
+    except Exception as e: # subprocess.run 자체에서 발생할 수 있는 다른 예외들 (권한 문제 등)
+        print(f"Unexpected error running {script_name}: {e}", file=sys.stderr)
+        return False # 일반적인 실패
 
-#@st.cache_data #(show_spinner="매물 데이터 조회 중...") # 캐싱 데코레이터 추가
 def fetch_data(coords_tuple, output_dir):
     """
-    좌표 튜플을 기반으로 외부 스크립트를 실행하여 부동산 데이터를 가져옵니다. (캐싱 적용됨)
-    성공 시 (로드된 DataFrame, 동 이름), 실패 시 (빈 DataFrame, 동 이름 또는 None) 반환.
+    좌표 튜플을 기반으로 외부 스크립트를 순차적으로 실행하여 부동산 데이터를 가져옵니다.
+    반환값: (DataFrame, str_dong_name, str_error_signal or None)
+    - DataFrame: 성공 시 로드된 데이터, 실패 시 빈 DataFrame
+    - str_dong_name: 확인된 동 이름, 실패 시 "Unknown" 또는 유사 값
+    - str_error_signal: API 키 오류 시 "API_KEY_ERROR_SIGNAL", 그 외 성공/일반실패 시 None
     """
-    print(f"--- fetch_data 실행 시작 for coords: {coords_tuple} ---") # 캐시 확인용 로그
+    print(f"--- fetch_data 실행 시작 for coords: {coords_tuple} ---", file=sys.stderr)
 
-    # 튜플 유효성 검사 및 위도, 경도 추출
+    # --- 1. 입력 유효성 검사 및 파라미터 준비 ---
     if not isinstance(coords_tuple, tuple) or len(coords_tuple) != 2:
-        st.error("fetch_data: 유효하지 않은 좌표 튜플입니다.")
-        return pd.DataFrame(), None # 실패 시 빈 DF와 None 반환
+        print("오류: fetch_data: 유효하지 않은 좌표 튜플입니다.", file=sys.stderr)
+        return pd.DataFrame(), "Invalid_Coords", None # (df, dong_name, error_signal)
 
     latitude, longitude = coords_tuple
+    
+    # save_coordinates는 현재 직접적인 데이터 흐름에 영향을 주지 않으므로, 필요시 호출
+    # save_coordinates({'lat': latitude, 'lng': longitude}, output_dir) 
 
-    # 좌표 저장용 딕셔너리 생성 (save_coordinates는 딕셔너리 필요)
-    coords_dict = {'lat': latitude, 'lng': longitude}
-
-    # 좌표 저장 (변경 없음)
-    save_coordinates(coords_dict, output_dir)
-
-    # 파라미터 파일 생성 (변경 없음)
     params = create_params(latitude, longitude)
     params_file_rel_path = os.path.join(output_dir, 'params.json')
     params_file_abs_path = os.path.abspath(params_file_rel_path)
     try:
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True) # 출력 디렉토리 생성
         with open(params_file_abs_path, 'w', encoding='utf-8') as f:
             json.dump(params, f, ensure_ascii=False, indent=4)
-        print(f"파라미터 저장 완료: {params_file_abs_path}")
+        print(f"파라미터 저장 완료: {params_file_abs_path}", file=sys.stderr)
     except Exception as e:
-        st.error(f"파라미터 저장 중 오류: {e}")
-        return pd.DataFrame(), None # 실패 시 빈 DF와 None 반환
+        print(f"오류: 파라미터 저장 중 오류: {e}", file=sys.stderr)
+        return pd.DataFrame(), "Params_Save_Error", None
 
-    # --- (선택) 자동 인증 정보 가져오기 로직 (미구현 상태) ---
-    auth_token_to_pass = None
-    cookies_to_pass = None
-    # ---------------------------------------------------
-    # 스크립트 순차 실행 (run_external_script에 인증 정보 전달)
-    print("\n--- fetch_cortars.py 실행 시작 ---")
-    if not run_external_script('fetch_cortars.py', params_file_rel_path, auth_token=auth_token_to_pass, cookies=cookies_to_pass):
-        st.error("fetch_cortars.py 실패.")
-        # 실패해도 동 이름은 시도해볼 수 있음 (파일이 이미 생성되었을 수 있으므로)
-        dong_name_on_fail = get_dong_name_from_file(output_dir)
-        return pd.DataFrame(), dong_name_on_fail
-    print("--- fetch_cortars.py 실행 완료 ---")
+    # --- 2. 세션에서 설정값 가져오기 ---
+    user_headers = st.session_state.get('user_headers', {})
+    user_cookies = st.session_state.get('user_cookies', {})
+    naver_client_id = st.session_state.get('naver_client_id')
+    naver_client_secret = st.session_state.get('naver_client_secret')
 
-    # 동 이름 파일에서 읽기 (st.session_state 대신 변수에 저장)
-    dong_name = get_dong_name_from_file(output_dir)
-    print(f"동 이름 가져오기(파일): {dong_name}")
+    common_run_params = {
+        "headers_to_pass": user_headers,
+        "cookies_to_pass": user_cookies,
+        "client_id_to_pass": naver_client_id,
+        "client_secret_to_pass": naver_client_secret
+    }
 
-    print("\n--- fetch_marker_ids.py 실행 시작 ---")
-    if not run_external_script('fetch_marker_ids.py', auth_token=auth_token_to_pass, cookies=cookies_to_pass):
-        st.error("fetch_marker_ids.py 실패.")
-        return pd.DataFrame(), dong_name # 실패 시 빈 DF와 현재까지 얻은 동 이름 반환
-    print("--- fetch_marker_ids.py 실행 완료 ---")
+    # --- 3. 외부 스크립트 순차 실행 ---
+    # 3.1. fetch_cortars.py 실행
+    print("\n--- fetch_cortars.py 실행 시작 ---", file=sys.stderr)
+    script_cortars_result = run_external_script('fetch_cortars.py', params_file_rel_path, **common_run_params)
+    # fetch_cortars.py는 API 키 오류를 직접 감지하지 않는다고 가정 (일반 성공/실패만 반환)
+    if not script_cortars_result: # True가 아닌 경우 (False 또는 다른 문자열 - 여기서는 False만 일반 실패로 간주)
+        print("오류: fetch_cortars.py 실행 실패.", file=sys.stderr)
+        dong_name_on_cortars_fail = get_dong_name_from_file(output_dir) # 실패해도 동 이름은 시도
+        return pd.DataFrame(), dong_name_on_cortars_fail, None
+    print("--- fetch_cortars.py 실행 완료 ---", file=sys.stderr)
+    dong_name = get_dong_name_from_file(output_dir) # 성공 후 동 이름 가져오기
+    print(f"동 이름 가져오기(파일): {dong_name}", file=sys.stderr)
 
-    print("\n--- collect_complex_details.py 실행 시작 ---")
-    if not run_external_script('collect_complex_details.py', auth_token=auth_token_to_pass, cookies=cookies_to_pass):
-        st.error("collect_complex_details.py 실패.")
-        return pd.DataFrame(), dong_name # 실패 시 빈 DF와 현재까지 얻은 동 이름 반환
-    print("--- collect_complex_details.py 실행 완료 ---")
+    # 3.2. fetch_marker_ids.py 실행
+    print("\n--- fetch_marker_ids.py 실행 시작 ---", file=sys.stderr)
+    script_marker_result = run_external_script('fetch_marker_ids.py', **common_run_params)
+    
+    # API 키 오류 시그널 확인
+    if script_marker_result == "API_KEY_ERROR_FROM_SCRIPT_EXIT_CODE_99":
+        print("fetch_data: API Key error (exit code 99) detected from fetch_marker_ids.py.", file=sys.stderr)
+        # API 키 에러 발생 시, (빈 DataFrame, 현재까지의 동 이름, "API_KEY_ERROR_SIGNAL") 반환
+        return pd.DataFrame(), dong_name, "API_KEY_ERROR_SIGNAL" 
+    elif not script_marker_result: # True가 아닌 일반적인 실패 (False)
+        print("오류: fetch_marker_ids.py 실행 실패 (일반 오류).", file=sys.stderr)
+        return pd.DataFrame(), dong_name, None # 일반 실패 시 에러 신호는 None
+    print("--- fetch_marker_ids.py 실행 완료 ---", file=sys.stderr)
 
-    # 최종 데이터 로드 및 DataFrame 변환
+    # 3.3. collect_complex_details.py 실행
+    print("\n--- collect_complex_details.py 실행 시작 ---", file=sys.stderr)
+    # 이 스크립트도 API 키 오류를 직접 감지하지 않는다고 가정
+    if not run_external_script('collect_complex_details.py', **common_run_params):
+        print("오류: collect_complex_details.py 실행 실패.", file=sys.stderr)
+        return pd.DataFrame(), dong_name, None
+    print("--- collect_complex_details.py 실행 완료 ---", file=sys.stderr)
+
+    # --- 4. 최종 데이터 로드 ---
     final_data_file_rel_path = os.path.join(output_dir, 'complex_details_by_district.json')
     final_data_file_abs_path = os.path.abspath(final_data_file_rel_path)
-    print(f"\n최종 데이터 로드 시도: {final_data_file_abs_path}")
+    print(f"\n최종 데이터 로드 시도: {final_data_file_abs_path}", file=sys.stderr)
     try:
         with open(final_data_file_abs_path, 'r', encoding='utf-8') as file:
             raw_data = json.load(file)
-
-        # --- ▼▼▼ 수정 4: JSON을 DataFrame으로 변환하는 로직 추가 ▼▼▼ ---
-        # JSON 구조가 {'지역명': [{}, {}, ...]} 형태라고 가정
-        # dong_name을 키로 사용하거나, 첫 번째 키 사용 (상황에 맞게 조정 필요)
+        
+        # 동 이름으로 데이터 추출 (기존 로직과 유사)
         area_key_to_load = dong_name if dong_name != "Unknown" and dong_name in raw_data else None
-        if not area_key_to_load and raw_data:
-            area_key_to_load = list(raw_data.keys())[0] # 첫 번째 키 사용 (임시 방편)
+        if not area_key_to_load and raw_data: # 첫 번째 키를 사용하거나, 더 나은 로직 필요
+            area_key_to_load = list(raw_data.keys())[0] if raw_data.keys() else None
 
         if area_key_to_load and raw_data.get(area_key_to_load):
             loaded_df = pd.DataFrame(raw_data[area_key_to_load])
-            print("데이터 로딩 및 DataFrame 변환 성공")
-            # st.success는 app.py에서 호출하도록 제거
-            # st.success("데이터 로딩 완료!")
-            return loaded_df, dong_name # 성공 시 DataFrame과 동 이름 반환
+            print("데이터 로딩 및 DataFrame 변환 성공.", file=sys.stderr)
+            return loaded_df, dong_name, None # 성공 시 에러 신호는 None
         else:
-            print("로드된 JSON 데이터가 비어있거나 해당 지역 키가 없습니다.")
-            st.warning(f"'{dong_name}' 지역의 상세 데이터가 없습니다.") # UI 메시지 app.py에서 처리
-            return pd.DataFrame(), dong_name # 데이터 없으면 빈 DF와 동 이름 반환
-
+            print(f"경고: 로드된 JSON 데이터가 비었거나 '{dong_name}' 또는 '{area_key_to_load}' 지역 키가 없습니다.", file=sys.stderr)
+            return pd.DataFrame(), dong_name, None # 데이터 없어도 일반적인 흐름, 에러 신호 None
     except FileNotFoundError:
-        st.error(f"최종 데이터 파일({final_data_file_abs_path}) 없음.")
-        print(f"오류: 최종 데이터 파일({final_data_file_abs_path}) 없음")
+        print(f"오류: 최종 데이터 파일({final_data_file_abs_path}) 없음.", file=sys.stderr)
     except json.JSONDecodeError:
-        st.error(f"최종 데이터 파일({final_data_file_abs_path}) JSON 파싱 오류.")
-        print(f"오류: 최종 데이터 파일({final_data_file_abs_path}) JSON 파싱 실패")
+        print(f"오류: 최종 데이터 파일({final_data_file_abs_path}) JSON 파싱 오류.", file=sys.stderr)
     except Exception as e:
-        st.error(f"최종 데이터 로드 중 오류: {e}")
-        print(f"오류: 최종 데이터 로드 중 예상치 못한 오류: {e}")
+        print(f"오류: 최종 데이터 로드 중 예상치 못한 오류: {e}", file=sys.stderr)
 
-    # 로드 실패 시 빈 데이터프레임과 현재까지 얻은 동 이름 반환
-    return pd.DataFrame(), dong_name
+    # 최종적으로 실패한 경우
+    return pd.DataFrame(), dong_name, None
