@@ -1,4 +1,4 @@
-# your_project_directory/src/external_scripts/fetch_cortars.py
+# your_project_directory/src/external_`script`s/fetch_cortars.py
 import requests
 import json
 import pprint
@@ -131,17 +131,17 @@ if __name__ == "__main__":
 
         # fetch_cortars 함수에 환경변수에서 가져온 headers와 cookies 전달
         cortars_info_main = fetch_cortars(params_main, headers_from_env, cookies_from_env) # 변수명 변경
+        # 출력 파일 경로도 CWD 기준으로 output 디렉토리 안에 저장
+        output_filename = 'cortars_info.json'
+        # output_dir이 상대 경로인 경우, CWD를 기준으로 경로가 결정됩니다.
+        # data_handling.py와 일관성을 위해 os.path.join을 사용합니다.
+        output_filepath = os.path.join(output_dir, output_filename) 
+        # 절대 경로는 로그용으로만 사용
+        output_abs_filepath = os.path.abspath(output_filepath)
 
         if cortars_info_main:
-            # 출력 파일 경로도 CWD 기준으로 output 디렉토리 안에 저장
-            output_filename = 'cortars_info.json'
-            # output_dir이 상대 경로인 경우, CWD를 기준으로 경로가 결정됩니다.
-            # data_handling.py와 일관성을 위해 os.path.join을 사용합니다.
-            output_filepath = os.path.join(output_dir, output_filename) 
-            # 절대 경로는 로그용으로만 사용
-            output_abs_filepath_log = os.path.abspath(output_filepath)
 
-            print(f"Attempting to write cortars info to: {output_abs_filepath_log} (relative path used: {output_filepath})")
+            print(f"Attempting to write cortars info to: {output_abs_filepath} (relative path used: {output_filepath})")
 
             division_name = cortars_info_main.get('divisionName', 'Unknown_Division')
             cortar_name = cortars_info_main.get('cortarName', 'Unknown_Cortar')
@@ -157,16 +157,24 @@ if __name__ == "__main__":
 
                 with open(output_filepath, 'w', encoding='utf-8') as file: # 상대 경로 사용
                     json.dump(cortars_info_main, file, ensure_ascii=False, indent=4)
-                print(f"Cortars info for '{display_name}' collected and saved to '{output_abs_filepath_log}'")
+                print(f"Cortars info for '{display_name}' collected and saved to '{output_abs_filepath}'")
             except IOError as e:
-                print(f"Error writing cortars info to file '{output_abs_filepath_log}': {e}", file=sys.stderr)
+                print(f"Error writing cortars info to file '{output_abs_filepath}': {e}", file=sys.stderr)
                 sys.exit(1)
             except Exception as e:
                 print(f"An unexpected error occurred while writing cortars info: {e}", file=sys.stderr)
                 sys.exit(1)
         else:
-            print("No cortars data collected or an error occurred during fetching.", file=sys.stderr)
-            sys.exit(1) # fetch 실패 시 종료
+            print("No cortars data collected or an error occurred during fetching.", file=sys.stderr)            
+            try:
+                # 기존 파일이 있으면 빈 JSON 객체로 덮어쓰기
+                os.makedirs(output_dir, exist_ok=True)
+                with open(output_filepath, 'w', encoding='utf-8') as file:
+                    json.dump({}, file, ensure_ascii=False, indent=4)
+                print(f"Initialized/Cleared JSON file at '{output_abs_filepath}'.", file=sys.stderr)
+            except Exception as e:
+                print(f"Error initializing JSON file '{output_filepath}': {e}", file=sys.stderr)
+                sys.exit(1)
     else:
         print("Error: No parameter file path provided as command-line argument.", file=sys.stderr)
         print("Usage: python fetch_cortars.py <path_to_params.json>", file=sys.stderr)

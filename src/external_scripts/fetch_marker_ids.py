@@ -7,8 +7,6 @@ import sys
 import os
 # toml 라이브러리 임포트는 더 이상 필요하지 않습니다.
 
-# --- config.py 및 secrets.toml 로드 로직 전체 제거 ---
-
 def get_all_configs_from_env():
     """
     환경 변수에서 Header, Cookie, Naver API 키 정보를 가져와 파싱합니다.
@@ -134,7 +132,7 @@ def fetch_marker_info(cortars_info, headers_env, cookies_env, client_id_env, cli
     params = {
         'cortarNo': cortarNo, 'zoom': 15, 'priceType': 'RETAIL', 'markerId': '', 'markerType': '',
         'selectedComplexNo': '', 'selectedComplexBuildingNo': '', 'fakeComplexMarker': '',
-        'realEstateType': 'APT', 'tradeType': '', 'tag': '::::::::', 'rentPriceMin': 0,
+        'realEstateType': 'APT:JGC:PRE:ABYG', 'tradeType': '', 'tag': '::::::::', 'rentPriceMin': 0,
         'rentPriceMax': 900000000, 'priceMin': 0, 'priceMax': 900000000, 'areaMin': 0,
         'areaMax': 900000000, 'oldBuildYears': '', 'recentlyBuildYears': '', 'minHouseHoldCount': 300,
         'maxHouseHoldCount': '', 'showArticle': 'false', 'sameAddressGroup': 'false',
