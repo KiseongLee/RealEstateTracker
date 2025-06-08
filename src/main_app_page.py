@@ -39,11 +39,21 @@ def display_main_app_view():
         show_api_key_error_modal_on_main() # 팝업 함수 호출
         # 팝업이 떠 있는 동안에는 아래 UI 렌더링이 중단될 수 있으므로,
         # 사용자가 "확인"을 누르면 rerun되어 app.py에서 리디렉션이 일어납니다.
+    elif st.session_state.get('error_popup_on_main_page', False):
+        @st.dialog("일반 오류")
+        def show_error_modal_on_main():
+            st.error("Error 발생. \nCookie와 Header를 확인하고 올바른 값으로 다시 등록해주세요.")
+            if st.button("확인", key="api_key_error_modal_confirm_on_main"):
+                st.session_state.error_popup_on_main_page = False # 팝업 플래그 리셋
+                st.session_state.force_redirect_to_config = True # 리디렉션 플래그 설정
+                st.rerun() # app.py가 리디렉션 처리하도록 rerun
+        
+        show_error_modal_on_main() # 팝업 함수 호출
 # ==============================================================================
 # 1. 페이지 기본 정보 및 스타일 설정 (이전과 동일) ####
 # ==============================================================================
     st.title("부동산 실시간 호가 검색 프로그램")
-    text = "네이버 부동산 API를 사용하여 특정 좌표에 대한 부동산 목록을 가져와서 표시합니다.<br>조회 기준은 300세대 이상 아파트 입니다.(재건축, 분양권 제외)"
+    text = "네이버 부동산 API를 사용하여 특정 좌표에 대한 부동산 목록을 가져와서 표시합니다.<br>조회 기준은 300세대 이상 아파트 입니다."
     st.markdown(text, unsafe_allow_html=True)
 
     # 메인 앱 범위에서 사용할 상수 및 변수 
@@ -137,12 +147,6 @@ def display_main_app_view():
         st.session_state.error_message = None
         st.session_state.dong_name = None
         st.session_state.current_df = pd.DataFrame()
-
-    # 데이터 가져오기 캐시 함수 
-    @st.cache_data(ttl=600)
-    def cached_fetch_data_main(coords_tuple, output_dir_param):
-        print(f"--- cached_fetch_data_main 호출 for {coords_tuple} ---")
-        return fetch_data(coords_tuple, output_dir_param) # src.data_handling.fetch_data 호출
 # ==============================================================================
 # 3. UI 레이아웃 구성 (지도, 그룹 관리, 오버레이) ####
 # ==============================================================================
@@ -248,7 +252,7 @@ def display_main_app_view():
 
     coords_to_fetch_now = st.session_state.get('coords_to_fetch')
     # API 키 오류 팝업이 떠야 하는 상황이 아니고, 실제로 데이터를 가져와야 할 때만 아래 로직 실행
-    if not st.session_state.get('show_api_key_error_popup_on_main_page') and coords_to_fetch_now is not None and st.session_state.get('is_fetching'):
+    if not st.session_state.get('show_api_key_error_popup_on_main_page') and not st.session_state.get('error_popup_on_main_page') and coords_to_fetch_now is not None and st.session_state.get('is_fetching'):
         
         print(f"Main App Page Logic: 데이터 조회 시작 - {coords_to_fetch_now}", file=sys.stderr)
         st.session_state.coords_to_fetch = None # 한 번만 조회하도록 초기화
@@ -256,10 +260,18 @@ def display_main_app_view():
             print(f"Main App Page Logic: cached_fetch_data_main 호출 ({coords_to_fetch_now}, {OUTPUT_DIR})")
             df_fetched, dong_name_from_fetch, error_signal = cached_fetch_data_main(coords_to_fetch_now, OUTPUT_DIR)
             
-            # ======================== ▼▼▼ API 키 에러 신호 처리 ▼▼▼ ========================
+            # ======================== ▼▼▼ 에러 신호 처리 ▼▼▼ ========================
+            # ======================== API KEY ERROR =============================
             if error_signal == "API_KEY_ERROR_SIGNAL":
                 print("Main App Page: API Key Error Signal received from fetch_data.", file=sys.stderr)
                 st.session_state.show_api_key_error_popup_on_main_page = True # 현재 페이지에 팝업 띄우기
+                st.session_state.is_fetching = False # 로딩 중 상태 해제
+                st.rerun() # app.py의 라우팅 로직을 다시 타도록 함
+                return # 현재 display_main_app_view 함수 실행 중단 (rerun이 실행 흐름을 변경)
+            # ======================== 일반적 ERROR(Cookie, Header) =============================
+            elif error_signal == "ERROR":
+                print("Main App Page: Error Signal received from fetch_data.", file=sys.stderr)
+                st.session_state.error_popup_on_main_page = True # 현재 페이지에 팝업 띄우기
                 st.session_state.is_fetching = False # 로딩 중 상태 해제
                 st.rerun() # app.py의 라우팅 로직을 다시 타도록 함
                 return # 현재 display_main_app_view 함수 실행 중단 (rerun이 실행 흐름을 변경)

@@ -18,7 +18,8 @@ default_session_values = {
     'user_headers': None, 'user_cookies': None,
     'naver_client_id': None, 'naver_client_secret': None,
     'force_redirect_to_config': False, # 리디렉션 강제 플래그
-    'show_api_key_error_popup_on_main_page': False # main_app_page 팝업 플래그
+    'show_api_key_error_popup_on_main_page': False, # main_app_page 팝업 플래그
+    'error_popup_on_main_page': False # 일반적 Error
 }
 for key, value in default_session_values.items():
     if key not in st.session_state:

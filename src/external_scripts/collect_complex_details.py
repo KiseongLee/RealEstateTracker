@@ -6,8 +6,6 @@ import time # API 호출 간격 제어 등에 필요
 import sys
 import os
 
-# --- config.py 임포트 로직 제거 ---
-
 def get_config_from_env():
     """
     환경 변수에서 Header와 Cookie 정보를 가져와 파싱합니다.
@@ -49,7 +47,7 @@ def fetch_complex_details(complex_no, page, headers_env, cookies_env):
     """주어진 단지 번호(complex_no)와 페이지 번호로 매물 상세 정보를 가져옵니다."""
     detail_url = f'https://new.land.naver.com/api/articles/complex/{complex_no}'
     params = {
-        'realEstateType': 'APT:ABYG:JGC:PRE', 
+        'realEstateType': 'APT:JGC:PRE:ABYG', 
         'tradeType': '', 'tag': '::::::::', 'rentPriceMin': 0, 'rentPriceMax': 900000000,
         'priceMin': 0, 'priceMax': 900000000, 'areaMin': 0, 'areaMax': 900000000,
         'oldBuildYears': '', 'recentlyBuildYears': '', 'minHouseHoldCount': '', 
@@ -130,7 +128,7 @@ if __name__ == "__main__":
             print(f"Warning: Skipping area '{area_name_loop}', marker data not a list (type: {type(markers_list_loop)}).", file=sys.stderr)
             continue
 
-        print(f"\n--- Collecting details for area: {area_name_loop} ---", file=sys.stderr)
+        print(f"Collecting details for area: {area_name_loop}", file=sys.stderr)
         area_complex_details_list = [] # 현재 지역 상세 정보 리스트, 변수명 변경
 
         for marker_info_loop in markers_list_loop: # 변수명 충돌 방지
@@ -197,20 +195,33 @@ if __name__ == "__main__":
             print(f"No details collected for area: {area_name_loop}.", file=sys.stderr)
 
     if complex_details_by_district_output:
-        print(f"\n--- Saving {total_articles_collected} articles from {total_complexes_processed} complexes ---", file=sys.stderr)
+        print(f"Saving {total_articles_collected} articles from {total_complexes_processed} complexes", file=sys.stderr)
         print(f"Writing to: {output_abs_filepath} (relative: {output_filepath})", file=sys.stderr)
         try:
-            os.makedirs(output_dir, exist_ok=True) # output 디렉토리 생성
-            with open(output_filepath, 'w', encoding='utf-8') as file: # 상대 경로 사용
+            os.makedirs(output_dir, exist_ok=True)
+            with open(output_filepath, 'w', encoding='utf-8') as file:
                 json.dump(complex_details_by_district_output, file, ensure_ascii=False, indent=4)
             print(f"Complex details saved to '{output_abs_filepath}'", file=sys.stderr)
         except Exception as e:
             print(f"Error writing output file '{output_filepath}': {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        print("\nNo complex details collected overall.", file=sys.stderr)
-        if total_articles_collected == 0 and total_complexes_processed > 0: # 처리 시도는 했으나 결과가 없는 경우
-            sys.exit(1) # 실패로 간주
+        print("No complex details collected overall. Initializing/Clearing JSON file.", file=sys.stderr)
+        try:
+            # 기존 파일이 있으면 빈 JSON 객체로 덮어쓰기
+            os.makedirs(output_dir, exist_ok=True)
+            with open(output_filepath, 'w', encoding='utf-8') as file:
+                json.dump({}, file, ensure_ascii=False, indent=4)
+            print(f"Initialized/Cleared JSON file at '{output_abs_filepath}'.", file=sys.stderr)
+        except Exception as e:
+            print(f"Error initializing JSON file '{output_filepath}': {e}", file=sys.stderr)
+            sys.exit(1)
+        
+        # 처리 시도는 했으나 결과가 없는 경우 (복잡한 단지는 처리했으나 매물이 하나도 없음)
+        if total_articles_collected == 0 and total_complexes_processed > 0:
+            sys.exit(1)  # 실패로 간주
+        else:
+            sys.exit(0)  # 처리할 데이터 자체가 없었을 경우 정상 종료
 
-    print("\nScript finished successfully.", file=sys.stderr)
+    print("Script finished successfully.", file=sys.stderr)
     sys.exit(0)

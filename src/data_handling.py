@@ -177,8 +177,8 @@ def fetch_data(coords_tuple, output_dir):
     # fetch_cortars.py는 API 키 오류를 직접 감지하지 않는다고 가정 (일반 성공/실패만 반환)
     if not script_cortars_result: # True가 아닌 경우 (False 또는 다른 문자열 - 여기서는 False만 일반 실패로 간주)
         print("오류: fetch_cortars.py 실행 실패.", file=sys.stderr)
-        dong_name_on_cortars_fail = get_dong_name_from_file(output_dir) # 실패해도 동 이름은 시도
-        return pd.DataFrame(), dong_name_on_cortars_fail, None
+        #dong_name_on_cortars_fail = get_dong_name_from_file(output_dir) # 실패해도 동 이름은 시도
+        return pd.DataFrame(), "Unknown", "ERROR"
     print("--- fetch_cortars.py 실행 완료 ---", file=sys.stderr)
     dong_name = get_dong_name_from_file(output_dir) # 성공 후 동 이름 가져오기
     print(f"동 이름 가져오기(파일): {dong_name}", file=sys.stderr)
