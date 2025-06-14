@@ -6,3 +6,4 @@ streamlit-aggrid
 numpy
 xlsxwriter
 streamlit_local_storage
+urllib3<2.0
