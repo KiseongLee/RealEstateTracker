@@ -2,7 +2,7 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, ColumnsAutoSizeMode
 import pandas as pd
 from folium.features import DivIcon # DivIcon을 사용하기 위해 임포트
 
@@ -209,11 +209,10 @@ def get_aggrid_options(df):
 
     gridOptions = gb.build()
 
-    # 서버 python에서는 st_aggrid 버전이 낮아 사용 불가함.
     # 컬럼 크기 자동 조정 모드 (선택 사항, fitGridWidth가 일반적) [6]
-    # gridOptions['columnAutoSizeStrategy'] = {
-    #     'type': 'fitGridWidth' # 컬럼 전체 너비를 그리드 너비에 맞춤
-    # }
+    gridOptions['columnAutoSizeStrategy'] = {
+        'type': 'fitGridWidth' # 컬럼 전체 너비를 그리드 너비에 맞춤
+    }
 
     return gridOptions
 
