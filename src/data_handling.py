@@ -7,11 +7,21 @@ import sys # sys 모듈 임포트 추가
 # 최종 데이터를 DataFrame으로 반환하기 위해 필요
 import pandas as pd
 
-# 외부 스크립트가 있는 디렉토리 경로 (data_handling.py 기준 상대 경로)
-EXTERNAL_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "external_scripts")
-OUTPUT_DIR = "output" # 출력 디렉토리 정의 (fetch_data 등에서 일관되게 사용)
+# 경로 설정
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_SECRETS_PATH = os.path.join(PROJECT_ROOT, 'config_secrets.json')
+EXTERNAL_SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "src", "external_scripts")
 
-
+def load_auth_from_file():
+    """config_secrets.json 파일에서 header와 cookie 정보를 읽어옵니다."""
+    try:
+        with open(CONFIG_SECRETS_PATH, 'r', encoding='utf-8') as f:
+            secrets = json.load(f)
+        # headers와 cookies만 반환하도록 수정
+        return secrets.get('headers', {}), secrets.get('cookies', {})
+    except Exception as e:
+        print(f"오류: 비밀 정보 파일({CONFIG_SECRETS_PATH}) 로드 실패: {e}", file=sys.stderr)
+        return None, None
 def save_coordinates(coords, output_dir):
     """
     클릭된 좌표를 지정된 출력 디렉토리의 JSON 파일에 저장합니다. (현재 사용 안 함 가정)
@@ -158,8 +168,12 @@ def fetch_data(coords_tuple, output_dir):
         return pd.DataFrame(), "Params_Save_Error", None
 
     # --- 2. 세션에서 설정값 가져오기 ---
-    user_headers = st.session_state.get('user_headers', {})
-    user_cookies = st.session_state.get('user_cookies', {})
+    # --- 파일에서 Header/Cookie 로드 ---
+    user_headers, user_cookies = load_auth_from_file()
+    if user_headers is None or user_cookies is None:
+        return pd.DataFrame(), "Config_File_Error", "ERROR"
+    # user_headers = st.session_state.get('user_headers', {})
+    # user_cookies = st.session_state.get('user_cookies', {})
     naver_client_id = st.session_state.get('naver_client_id')
     naver_client_secret = st.session_state.get('naver_client_secret')
 
