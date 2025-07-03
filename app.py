@@ -40,7 +40,7 @@ if st.session_state.get('force_redirect_to_config', False):
 # ==============================================================================
 #### 2. 페이지 설정 (st.set_page_config) ####
 # ==============================================================================
-if not st.session_state.get('user_configs_set') or not st.session_state.get('naver_api_keys_set'):
+if not st.session_state.get('naver_api_keys_set'):
     st.set_page_config(page_title="프로그램 초기 설정", layout="centered", initial_sidebar_state="collapsed")
 else:
     st.set_page_config(page_title="부동산 실시간 호가 검색 프로그램", layout="wide")
@@ -48,7 +48,7 @@ else:
 # ==============================================================================
 #### 3. 라우팅 로직 ####
 # ==============================================================================
-if not st.session_state.get('user_configs_set') or not st.session_state.get('naver_api_keys_set'):
+if not st.session_state.get('naver_api_keys_set'):
     print("App.py: Routing to config page.", file=sys.stderr)
     display_config_view()
 else:
